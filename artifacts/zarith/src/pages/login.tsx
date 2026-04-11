@@ -17,6 +17,16 @@ export default function Login() {
   const sendOtp = useSendOtp();
   const verifyOtp = useVerifyOtp();
 
+  const extractError = (err: unknown): string => {
+    if (!err) return "Unknown error";
+    const e = err as any;
+    // ApiError: data is the parsed JSON body from the server
+    const serverMsg = e?.data?.message ?? e?.data?.error ?? null;
+    if (serverMsg) return serverMsg;
+    // Fallback to the Error.message built by ApiError (contains HTTP status + body)
+    return e?.message ?? String(err);
+  };
+
   const handleEmailSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -25,11 +35,12 @@ export default function Login() {
         if (res.success) {
           setStep("otp");
         } else {
-          setError(res.message);
+          setError(res.message ?? "OTP send failed.");
         }
       },
-      onError: () => {
-        setError("Failed to transmit OTP. Check your connection.");
+      onError: (err) => {
+        console.error("[login] send-otp error:", err);
+        setError(extractError(err));
       },
     });
   };
@@ -45,12 +56,13 @@ export default function Login() {
           if (res.accessToken) localStorage.setItem("zarith_token", res.accessToken);
           setLocation("/dashboard");
         } else {
-          setError("Authorization code rejected. Access denied.");
+          setError(res.message ?? "Authorization code rejected.");
           setOtp("");
         }
       },
-      onError: () => {
-        setError("Invalid or expired code. Request a new one.");
+      onError: (err) => {
+        console.error("[login] verify-otp error:", err);
+        setError(extractError(err));
         setOtp("");
       },
     });

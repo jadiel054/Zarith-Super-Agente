@@ -37,13 +37,26 @@ router.post("/send-otp", async (req, res) => {
     });
 
     if (error) {
-      res.status(400).json({ success: false, message: error.message });
+      console.error("[auth/send-otp] Supabase error:", error.name, error.message, error);
+      res.status(400).json({
+        success: false,
+        message: `Supabase: ${error.message}`,
+        code: error.name,
+      });
       return;
     }
 
-    res.json({ success: true, message: "OTP transmitted to secure relay. Check your email." });
+    res.json({ success: true, message: "OTP transmitted. Check your email." });
   } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message || "Failed to send OTP" });
+    const cause = err?.cause;
+    const detail = cause?.message ?? err?.message ?? "Unknown error";
+    const code = cause?.code ?? err?.code ?? "UNKNOWN";
+    console.error("[auth/send-otp] Exception:", code, detail, err);
+    res.status(500).json({
+      success: false,
+      message: `Network error [${code}]: ${detail}`,
+      code,
+    });
   }
 });
 
@@ -63,7 +76,9 @@ router.post("/verify-otp", async (req, res) => {
     });
 
     if (error || !data.session) {
-      res.status(401).json({ success: false, message: error?.message || "Invalid or expired OTP" });
+      const msg = error?.message ?? "Invalid or expired OTP";
+      console.error("[auth/verify-otp] Supabase error:", msg, error);
+      res.status(401).json({ success: false, message: `Supabase: ${msg}` });
       return;
     }
 
@@ -74,7 +89,15 @@ router.post("/verify-otp", async (req, res) => {
       accessToken: data.session.access_token,
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message || "Failed to verify OTP" });
+    const cause = err?.cause;
+    const detail = cause?.message ?? err?.message ?? "Unknown error";
+    const code = cause?.code ?? err?.code ?? "UNKNOWN";
+    console.error("[auth/verify-otp] Exception:", code, detail, err);
+    res.status(500).json({
+      success: false,
+      message: `Network error [${code}]: ${detail}`,
+      code,
+    });
   }
 });
 
