@@ -8,6 +8,33 @@
 import * as zod from "zod";
 
 /**
+ * @summary Send OTP code to email via Supabase
+ */
+export const SendOtpBody = zod.object({
+  email: zod.string().email(),
+});
+
+export const SendOtpResponse = zod.object({
+  success: zod.boolean(),
+  message: zod.string(),
+});
+
+/**
+ * @summary Verify OTP code and return session
+ */
+export const VerifyOtpBody = zod.object({
+  email: zod.string().email(),
+  token: zod.string(),
+});
+
+export const VerifyOtpResponse = zod.object({
+  success: zod.boolean(),
+  userId: zod.string().nullish(),
+  email: zod.string().nullish(),
+  accessToken: zod.string().nullish(),
+});
+
+/**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({

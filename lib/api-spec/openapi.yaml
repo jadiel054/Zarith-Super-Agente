@@ -19,6 +19,48 @@ tags:
   - name: dashboard
     description: Dashboard summary data
 paths:
+  /auth/send-otp:
+    post:
+      operationId: sendOtp
+      tags: [auth]
+      summary: Send OTP code to email via Supabase
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendOtpBody"
+      responses:
+        "200":
+          description: OTP sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OtpSentResponse"
+        "400":
+          description: Invalid email
+
+  /auth/verify-otp:
+    post:
+      operationId: verifyOtp
+      tags: [auth]
+      summary: Verify OTP code and return session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyOtpBody"
+      responses:
+        "200":
+          description: Session data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "401":
+          description: Invalid OTP
+
   /healthz:
     get:
       operationId: healthCheck
@@ -208,6 +250,55 @@ paths:
 
 components:
   schemas:
+    SendOtpBody:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      required:
+        - email
+
+    OtpSentResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required:
+        - success
+        - message
+
+    VerifyOtpBody:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        token:
+          type: string
+      required:
+        - email
+        - token
+
+    SessionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        userId:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        accessToken:
+          type: string
+          nullable: true
+      required:
+        - success
+
     HealthStatus:
       type: object
       properties:

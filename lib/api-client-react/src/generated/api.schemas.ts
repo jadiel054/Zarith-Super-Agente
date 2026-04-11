@@ -5,6 +5,27 @@
  * ZARITH Executive AI Agent API
  * OpenAPI spec version: 0.1.0
  */
+export interface SendOtpBody {
+  email: string;
+}
+
+export interface OtpSentResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface VerifyOtpBody {
+  email: string;
+  token: string;
+}
+
+export interface SessionResponse {
+  success: boolean;
+  userId?: string | null;
+  email?: string | null;
+  accessToken?: string | null;
+}
+
 export interface HealthStatus {
   status: string;
 }
