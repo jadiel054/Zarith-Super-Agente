@@ -2,6 +2,7 @@ import { Link, useLocation } from "wouter";
 import { LayoutDashboard, CheckSquare, Activity, LogOut, TerminalSquare, X } from "lucide-react";
 import { useListTasks } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
 
 interface SidebarProps {
   onClose?: () => void;
@@ -10,10 +11,10 @@ interface SidebarProps {
 export function Sidebar({ onClose }: SidebarProps) {
   const [location, setLocation] = useLocation();
   const { data: recentTasks } = useListTasks({ limit: 5 });
+  const { email, logout } = useAuth();
 
   const handleLogout = () => {
-    localStorage.removeItem("zarith_authenticated");
-    localStorage.removeItem("zarith_email");
+    logout();
     setLocation("/login");
   };
 
@@ -109,7 +110,13 @@ export function Sidebar({ onClose }: SidebarProps) {
         </div>
       </nav>
 
-      <div className="p-4 border-t border-sidebar-border">
+      <div className="p-4 border-t border-sidebar-border space-y-3">
+        {email && (
+          <div className="px-3 py-2 rounded-sm bg-primary/5 border border-primary/10">
+            <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mb-0.5">Operator</p>
+            <p className="text-xs font-mono text-primary truncate">{email}</p>
+          </div>
+        )}
         <button
           onClick={handleLogout}
           data-testid="button-logout"

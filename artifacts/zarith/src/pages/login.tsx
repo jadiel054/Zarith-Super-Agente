@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import { TerminalSquare, Shield, ArrowRight, Loader2, Mail, RefreshCw } from "lucide-react";
@@ -6,24 +6,42 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { useSendOtp, useVerifyOtp } from "@workspace/api-client-react";
+import { writeAuthStorage } from "@/hooks/use-auth";
+
+const SESSION_EMAIL_KEY = "zarith_login_email";
+const SESSION_STEP_KEY = "zarith_login_step";
 
 export default function Login() {
   const [, setLocation] = useLocation();
-  const [step, setStep] = useState<"email" | "otp">("email");
-  const [email, setEmail] = useState("");
+
+  // Restore email + step from sessionStorage so mobile minimise doesn't wipe the form
+  const [step, setStep] = useState<"email" | "otp">(() => {
+    const saved = sessionStorage.getItem(SESSION_STEP_KEY);
+    return saved === "otp" ? "otp" : "email";
+  });
+  const [email, setEmail] = useState(() => {
+    return sessionStorage.getItem(SESSION_EMAIL_KEY) ?? "";
+  });
   const [otp, setOtp] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const sendOtp = useSendOtp();
   const verifyOtp = useVerifyOtp();
 
+  // Keep sessionStorage in sync
+  useEffect(() => {
+    sessionStorage.setItem(SESSION_EMAIL_KEY, email);
+  }, [email]);
+
+  useEffect(() => {
+    sessionStorage.setItem(SESSION_STEP_KEY, step);
+  }, [step]);
+
   const extractError = (err: unknown): string => {
     if (!err) return "Unknown error";
     const e = err as any;
-    // ApiError: data is the parsed JSON body from the server
     const serverMsg = e?.data?.message ?? e?.data?.error ?? null;
     if (serverMsg) return serverMsg;
-    // Fallback to the Error.message built by ApiError (contains HTTP status + body)
     return e?.message ?? String(err);
   };
 
@@ -51,9 +69,10 @@ export default function Login() {
     verifyOtp.mutate({ data: { email, token: value } }, {
       onSuccess: (res) => {
         if (res.success) {
-          localStorage.setItem("zarith_authenticated", "true");
-          localStorage.setItem("zarith_email", email);
-          if (res.accessToken) localStorage.setItem("zarith_token", res.accessToken);
+          writeAuthStorage(email, res.accessToken ?? null);
+          // Clear session state — login complete
+          sessionStorage.removeItem(SESSION_EMAIL_KEY);
+          sessionStorage.removeItem(SESSION_STEP_KEY);
           setLocation("/dashboard");
         } else {
           setError(res.message ?? "Authorization code rejected.");
@@ -66,6 +85,13 @@ export default function Login() {
         setOtp("");
       },
     });
+  };
+
+  const handleAbort = () => {
+    setStep("email");
+    setError(null);
+    setOtp("");
+    sessionStorage.removeItem(SESSION_STEP_KEY);
   };
 
   const isPending = sendOtp.isPending || verifyOtp.isPending;
@@ -129,7 +155,7 @@ export default function Login() {
               </div>
 
               {error && (
-                <p className="text-xs font-mono text-destructive text-center">{error}</p>
+                <p className="text-xs font-mono text-destructive text-center break-all">{error}</p>
               )}
 
               <Button
@@ -159,7 +185,8 @@ export default function Login() {
                   Authorization Code
                 </label>
                 <p className="text-[10px] font-mono text-muted-foreground">
-                  Code transmitted to <span className="text-primary">{email}</span>
+                  Code transmitted to{" "}
+                  <span className="text-primary break-all">{email}</span>
                 </p>
               </div>
 
@@ -190,16 +217,16 @@ export default function Login() {
               )}
 
               {error && (
-                <p className="text-xs font-mono text-destructive text-center">{error}</p>
+                <p className="text-xs font-mono text-destructive text-center break-all">{error}</p>
               )}
 
               <Button
                 variant="ghost"
-                onClick={() => { setStep("email"); setError(null); setOtp(""); }}
+                onClick={handleAbort}
                 disabled={isPending}
                 className="text-xs font-mono text-muted-foreground hover:text-primary flex items-center gap-1"
               >
-                <RefreshCw className="w-3 h-3" /> Abort & Retry
+                <RefreshCw className="w-3 h-3" /> Abort &amp; Retry
               </Button>
             </motion.div>
           )}
