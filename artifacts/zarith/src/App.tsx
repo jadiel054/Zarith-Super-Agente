@@ -8,6 +8,7 @@ import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
 import Tasks from "@/pages/tasks";
 import Logs from "@/pages/logs";
+import Settings from "@/pages/settings";
 
 import { Shell } from "@/components/layout/shell";
 import { ProtectedRoute } from "@/components/layout/protected-route";
@@ -47,6 +48,14 @@ function Router() {
         <ProtectedRoute>
           <Shell>
             <Logs />
+          </Shell>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/settings">
+        <ProtectedRoute>
+          <Shell>
+            <Settings />
           </Shell>
         </ProtectedRoute>
       </Route>

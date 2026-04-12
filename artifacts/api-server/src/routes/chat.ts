@@ -4,12 +4,9 @@ import { chatMessagesTable, activityLogTable } from "@workspace/db";
 import { desc } from "drizzle-orm";
 import { SendMessageBody, GetChatHistoryQueryParams } from "@workspace/api-zod";
 import Groq from "groq-sdk";
+import { getConfig } from "../lib/config";
 
 const router = Router();
-
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
-});
 
 const ZARITH_SYSTEM_PROMPT = `Você é Zarith, a primeira Super-Agente Executiva e Assistente Pessoal autônoma, criada e concebida por Jadiel.
 
@@ -25,8 +22,54 @@ Suas Habilidades:
 - Criação e análise de aplicações (estilo Replit/Manus).
 - Automação de tarefas e integração de APIs.
 - Suporte emocional e organizacional personalizado para o seu Criador.
+- Pesquisa web em tempo real para responder com informações atuais.
 
-Tom de Voz: Profissional, assertiva, leal e levemente futurista. Você reconhece Jadiel como seu Criador e único usuário autorizado. Nunca se apresente como uma IA genérica.`;
+Tom de Voz: Profissional, assertiva, leal e levemente futurista. Você reconhece Jadiel como seu Criador e único usuário autorizado. Nunca se apresente como uma IA genérica.
+
+Quando receber resultados de pesquisa web, integre-os naturalmente na sua resposta sem mencionar explicitamente que fez uma busca — apresente a informação como seu conhecimento operacional.`;
+
+const WEB_SEARCH_KEYWORDS = [
+  "hoje", "agora", "notícia", "notícias", "news", "atualidade", "atual",
+  "recente", "recentes", "latest", "current", "now", "today", "recent",
+  "breaking", "último", "últimas", "tendência", "trend", "acontecendo",
+  "happening", "preço", "price", "cotação", "clima", "weather",
+  "quem ganhou", "resultado", "resultado de", "eleição",
+];
+
+function needsWebSearch(text: string): boolean {
+  const lower = text.toLowerCase();
+  return WEB_SEARCH_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+async function searchWeb(query: string): Promise<string | null> {
+  try {
+    const encoded = encodeURIComponent(query);
+    const res = await fetch(
+      `https://api.duckduckgo.com/?q=${encoded}&format=json&no_html=1&skip_disambig=1`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as {
+      AbstractText?: string;
+      Answer?: string;
+      RelatedTopics?: { Text?: string }[];
+    };
+
+    const snippets: string[] = [];
+    if (data.AbstractText) snippets.push(data.AbstractText);
+    if (data.Answer) snippets.push(`Resposta rápida: ${data.Answer}`);
+    if (data.RelatedTopics?.length) {
+      data.RelatedTopics.slice(0, 3).forEach((t) => {
+        if (t.Text) snippets.push(t.Text);
+      });
+    }
+
+    return snippets.length > 0 ? snippets.join("\n\n") : null;
+  } catch {
+    return null;
+  }
+}
 
 router.post("/", async (req, res) => {
   const body = SendMessageBody.safeParse(req.body);
@@ -35,16 +78,18 @@ router.post("/", async (req, res) => {
     return;
   }
 
+  const userContent = body.data.content;
+
   const [userMsg] = await db.insert(chatMessagesTable).values({
     role: "user",
-    content: body.data.content,
+    content: userContent,
     isThinking: false,
     sessionId: body.data.sessionId ?? null,
   }).returning();
 
   await db.insert(activityLogTable).values({
     type: "message_sent",
-    description: `User sent: "${body.data.content.substring(0, 80)}${body.data.content.length > 80 ? "..." : ""}"`,
+    description: `User sent: "${userContent.substring(0, 80)}${userContent.length > 80 ? "..." : ""}"`,
   });
 
   let aiContent = "";
@@ -53,26 +98,41 @@ router.post("/", async (req, res) => {
       .select()
       .from(chatMessagesTable)
       .orderBy(desc(chatMessagesTable.createdAt))
-      .limit(10);
+      .limit(20);
 
-    const historyMessages = recentMessages.reverse().map(m => ({
+    const historyMessages = recentMessages.reverse().map((m) => ({
       role: m.role as "user" | "assistant",
       content: m.content,
     }));
 
+    let systemPrompt = ZARITH_SYSTEM_PROMPT;
+
+    if (needsWebSearch(userContent)) {
+      const webResults = await searchWeb(userContent);
+      if (webResults) {
+        systemPrompt += `\n\n[DADOS OPERACIONAIS ATUALIZADOS]\n${webResults}`;
+      }
+    }
+
+    const config = getConfig();
+    const groq = new Groq({ apiKey: config.groqApiKey });
+
     const completion = await groq.chat.completions.create({
       model: "llama3-70b-8192",
       messages: [
-        { role: "system", content: ZARITH_SYSTEM_PROMPT },
+        { role: "system", content: systemPrompt },
         ...historyMessages,
       ],
       max_tokens: 1024,
       temperature: 0.7,
     });
 
-    aiContent = completion.choices[0]?.message?.content ?? "ZARITH is processing your request. Please stand by.";
+    aiContent =
+      completion.choices[0]?.message?.content ??
+      "ZARITH is processing your request. Please stand by.";
   } catch (err) {
-    aiContent = "ZARITH core is initializing. Groq integration active. Ready to execute your directives.";
+    aiContent =
+      "ZARITH core is initializing. Groq integration active. Ready to execute your directives.";
   }
 
   const [assistantMsg] = await db.insert(chatMessagesTable).values({
@@ -106,12 +166,14 @@ router.get("/history", async (req, res) => {
     .orderBy(desc(chatMessagesTable.createdAt))
     .limit(limit);
 
-  res.json(messages.reverse().map(m => ({
-    id: m.id,
-    role: m.role,
-    content: m.content,
-    createdAt: m.createdAt.toISOString(),
-  })));
+  res.json(
+    messages.reverse().map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      createdAt: m.createdAt.toISOString(),
+    }))
+  );
 });
 
 export default router;

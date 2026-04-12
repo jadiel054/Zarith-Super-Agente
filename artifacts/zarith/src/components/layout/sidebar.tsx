@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, CheckSquare, Activity, LogOut, TerminalSquare, X } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Activity, LogOut, TerminalSquare, X, Settings } from "lucide-react";
 import { useListTasks } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -26,6 +26,7 @@ export function Sidebar({ onClose }: SidebarProps) {
     { href: "/dashboard", label: "COMMAND CENTER", icon: LayoutDashboard },
     { href: "/tasks", label: "TASKS", icon: CheckSquare },
     { href: "/logs", label: "ACTIVITY LOGS", icon: Activity },
+    { href: "/settings", label: "SYSTEM CONFIG", icon: Settings },
   ];
 
   return (
@@ -42,7 +43,6 @@ export function Sidebar({ onClose }: SidebarProps) {
             System: Online
           </p>
         </div>
-        {/* Close button — only visible on mobile */}
         <button
           onClick={onClose}
           className="lg:hidden p-1 text-muted-foreground hover:text-primary transition-colors"

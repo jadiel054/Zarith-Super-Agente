@@ -23,6 +23,8 @@ export default function Dashboard() {
 
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [lastResponseId, setLastResponseId] = useState<number | null>(null);
+  const prevPending = useRef(false);
 
   const agentStatus = sendMessage.isPending ? "thinking" : (summary?.agentStatus as any) || "idle";
 
@@ -31,6 +33,16 @@ export default function Dashboard() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [chatHistory, sendMessage.isPending]);
+
+  useEffect(() => {
+    if (prevPending.current && !sendMessage.isPending && chatHistory) {
+      const lastMsg = [...chatHistory].reverse().find((m: any) => m.role === "assistant");
+      if (lastMsg) setLastResponseId(lastMsg.id);
+      const timer = setTimeout(() => setLastResponseId(null), 2500);
+      return () => clearTimeout(timer);
+    }
+    prevPending.current = sendMessage.isPending;
+  }, [sendMessage.isPending, chatHistory]);
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,15 +61,12 @@ export default function Dashboard() {
     <div className="flex-1 h-full flex flex-col overflow-hidden p-3 sm:p-6 gap-4">
       {/* Mobile: orb + stats row */}
       <div className="flex lg:hidden items-center gap-4">
-        {/* Small orb on mobile */}
         <div className="flex flex-col items-center gap-2 shrink-0">
           <Orb status={agentStatus} size="sm" />
           <span className="text-[9px] font-mono text-primary uppercase tracking-widest animate-pulse">
             {agentStatus}
           </span>
         </div>
-
-        {/* Stats grid on mobile */}
         <div className="flex-1 grid grid-cols-2 gap-2">
           {[
             { label: "Active", value: summary?.inProgressTasks ?? 0, color: "text-secondary" },
@@ -76,7 +85,6 @@ export default function Dashboard() {
       {/* Desktop: side panel */}
       <div className="hidden lg:flex lg:flex-row flex-1 gap-6 overflow-hidden">
         <div className="w-1/3 flex flex-col gap-6">
-          {/* Core display */}
           <div className="bg-black border border-primary/20 rounded-sm p-6 flex flex-col items-center justify-center relative overflow-hidden flex-1 min-h-[300px]">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
             <Orb status={agentStatus} size="lg" className="mb-8" />
@@ -88,7 +96,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Stats */}
           <div className="bg-black border border-primary/20 rounded-sm p-4 grid grid-cols-2 gap-4">
             {[
               { label: "Active Tasks", value: summary?.inProgressTasks ?? 0, color: "text-secondary" },
@@ -104,7 +111,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Chat — desktop */}
         <ChatPanel
           chatHistory={chatHistory}
           isPending={sendMessage.isPending}
@@ -112,11 +118,12 @@ export default function Dashboard() {
           setInput={setInput}
           onSend={handleSend}
           scrollRef={scrollRef}
+          lastResponseId={lastResponseId}
           className="flex-1"
         />
       </div>
 
-      {/* Chat — mobile (fills remaining space) */}
+      {/* Chat — mobile */}
       <ChatPanel
         chatHistory={chatHistory}
         isPending={sendMessage.isPending}
@@ -124,6 +131,7 @@ export default function Dashboard() {
         setInput={setInput}
         onSend={handleSend}
         scrollRef={scrollRef}
+        lastResponseId={lastResponseId}
         className="flex-1 min-h-0 lg:hidden"
       />
     </div>
@@ -137,10 +145,11 @@ interface ChatPanelProps {
   setInput: (v: string) => void;
   onSend: (e: React.FormEvent) => void;
   scrollRef: React.RefObject<HTMLDivElement>;
+  lastResponseId: number | null;
   className?: string;
 }
 
-function ChatPanel({ chatHistory, isPending, input, setInput, onSend, scrollRef, className }: ChatPanelProps) {
+function ChatPanel({ chatHistory, isPending, input, setInput, onSend, scrollRef, lastResponseId, className }: ChatPanelProps) {
   return (
     <div className={`flex flex-col bg-black border border-primary/20 rounded-sm relative overflow-hidden ${className ?? ""}`}>
       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
@@ -152,27 +161,39 @@ function ChatPanel({ chatHistory, isPending, input, setInput, onSend, scrollRef,
       <ScrollArea className="flex-1 p-3 sm:p-4" ref={scrollRef}>
         <div className="space-y-4">
           <AnimatePresence initial={false}>
-            {chatHistory?.map((msg: any) => (
-              <motion.div
-                key={msg.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
-              >
-                <span className="text-[10px] font-mono text-muted-foreground mb-1 uppercase tracking-widest">
-                  {msg.role === 'user' ? 'Operator' : 'Zarith'} // {format(new Date(msg.createdAt), 'HH:mm:ss')}
-                </span>
-                <div
-                  className={`p-3 max-w-[85%] rounded-sm font-mono text-xs sm:text-sm break-words ${
-                    msg.role === 'user'
-                      ? 'bg-primary/10 border border-primary/30 text-primary'
-                      : 'bg-secondary/10 border border-secondary/30 text-secondary'
-                  }`}
+            {chatHistory?.map((msg: any) => {
+              const isJustArrived = msg.role === "assistant" && msg.id === lastResponseId;
+              return (
+                <motion.div
+                  key={msg.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
                 >
-                  {msg.content}
-                </div>
-              </motion.div>
-            ))}
+                  <span className="text-[10px] font-mono text-muted-foreground mb-1 uppercase tracking-widest">
+                    {msg.role === 'user' ? 'Operator' : 'Zarith'} // {format(new Date(msg.createdAt), 'HH:mm:ss')}
+                  </span>
+                  <motion.div
+                    animate={isJustArrived ? {
+                      boxShadow: [
+                        "0 0 0px rgba(0,255,255,0)",
+                        "0 0 18px rgba(0,255,255,0.6)",
+                        "0 0 8px rgba(0,255,255,0.3)",
+                        "0 0 0px rgba(0,255,255,0)",
+                      ],
+                    } : {}}
+                    transition={{ duration: 2, ease: "easeOut" }}
+                    className={`p-3 max-w-[85%] rounded-sm font-mono text-xs sm:text-sm break-words ${
+                      msg.role === 'user'
+                        ? 'bg-primary/10 border border-primary/30 text-primary'
+                        : 'bg-secondary/10 border border-secondary/30 text-secondary'
+                    }`}
+                  >
+                    {msg.content}
+                  </motion.div>
+                </motion.div>
+              );
+            })}
             {isPending && (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
@@ -183,7 +204,16 @@ function ChatPanel({ chatHistory, isPending, input, setInput, onSend, scrollRef,
                   Zarith // Processing
                 </span>
                 <div className="p-3 max-w-[80%] rounded-sm font-mono text-sm bg-secondary/5 border border-secondary/20 text-secondary/70 flex items-center gap-2">
-                  <div className="w-1 h-3 bg-secondary animate-pulse" />
+                  <div className="flex gap-1">
+                    {[0, 1, 2].map((i) => (
+                      <motion.div
+                        key={i}
+                        className="w-1 h-3 bg-secondary/70 rounded-full"
+                        animate={{ opacity: [0.3, 1, 0.3], scaleY: [0.6, 1, 0.6] }}
+                        transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.2 }}
+                      />
+                    ))}
+                  </div>
                   Processing directive...
                 </div>
               </motion.div>
