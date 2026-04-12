@@ -188,6 +188,9 @@ export default function Login() {
                   Code transmitted to{" "}
                   <span className="text-primary break-all">{email}</span>
                 </p>
+                <p className="text-[10px] font-mono text-primary/50 mt-1">
+                  [ Local mode: check the API Server console log ]
+                </p>
               </div>
 
               <InputOTP
