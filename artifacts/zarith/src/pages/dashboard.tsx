@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Terminal, Zap } from "lucide-react";
+import { Send, Terminal, Zap, AlertTriangle, X } from "lucide-react";
 import {
   useGetDashboardSummary,
   useGetChatHistory,
@@ -25,6 +25,7 @@ export default function Dashboard() {
   const [quickInput, setQuickInput] = useState("");
   const [quickFocused, setQuickFocused] = useState(false);
   const [quickLastResponse, setQuickLastResponse] = useState<string | null>(null);
+  const [networkError, setNetworkError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [lastResponseId, setLastResponseId] = useState<number | null>(null);
   const prevPending = useRef(false);
@@ -55,21 +56,40 @@ export default function Dashboard() {
     queryClient.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
   };
 
+  const handleMutationError = (err: unknown) => {
+    const e = err as any;
+    const msg =
+      e?.data?.error ??
+      e?.data?.message ??
+      e?.message ??
+      "Falha ao enviar mensagem. Verifique a conexão com o servidor.";
+    setNetworkError(msg);
+    setTimeout(() => setNetworkError(null), 8000);
+  };
+
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
-    const message = input;
+    if (!input.trim() || sendMessage.isPending) return;
+    const message = input.trim();
     setInput("");
-    sendMessage.mutate({ data: { content: message } }, { onSuccess: invalidate });
+    setNetworkError(null);
+    sendMessage.mutate(
+      { data: { content: message } },
+      { onSuccess: invalidate, onError: handleMutationError }
+    );
   };
 
   const handleQuickSend = (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickInput.trim() || sendMessage.isPending) return;
-    const message = quickInput;
+    const message = quickInput.trim();
     setQuickInput("");
     setQuickLastResponse(null);
-    sendMessage.mutate({ data: { content: message } }, { onSuccess: invalidate });
+    setNetworkError(null);
+    sendMessage.mutate(
+      { data: { content: message } },
+      { onSuccess: invalidate, onError: handleMutationError }
+    );
   };
 
   return (
@@ -157,6 +177,8 @@ export default function Dashboard() {
         <ChatPanel
           chatHistory={chatHistory}
           isPending={sendMessage.isPending}
+          networkError={networkError}
+          onDismissError={() => setNetworkError(null)}
           input={input}
           setInput={setInput}
           onSend={handleSend}
@@ -170,6 +192,8 @@ export default function Dashboard() {
       <ChatPanel
         chatHistory={chatHistory}
         isPending={sendMessage.isPending}
+        networkError={networkError}
+        onDismissError={() => setNetworkError(null)}
         input={input}
         setInput={setInput}
         onSend={handleSend}
@@ -271,6 +295,8 @@ function QuickCommand({
 interface ChatPanelProps {
   chatHistory: any;
   isPending: boolean;
+  networkError: string | null;
+  onDismissError: () => void;
   input: string;
   setInput: (v: string) => void;
   onSend: (e: React.FormEvent) => void;
@@ -279,7 +305,10 @@ interface ChatPanelProps {
   className?: string;
 }
 
-function ChatPanel({ chatHistory, isPending, input, setInput, onSend, scrollRef, lastResponseId, className }: ChatPanelProps) {
+function ChatPanel({
+  chatHistory, isPending, networkError, onDismissError,
+  input, setInput, onSend, scrollRef, lastResponseId, className,
+}: ChatPanelProps) {
   const [focused, setFocused] = useState(false);
 
   return (
@@ -290,20 +319,41 @@ function ChatPanel({ chatHistory, isPending, input, setInput, onSend, scrollRef,
         <span className="text-xs font-mono text-primary uppercase tracking-widest">Direct Link Active</span>
       </div>
 
+      {/* Network error banner */}
+      <AnimatePresence>
+        {networkError && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden shrink-0"
+          >
+            <div className="flex items-start gap-2 px-4 py-2 bg-destructive/10 border-b border-destructive/30">
+              <AlertTriangle className="w-3.5 h-3.5 text-destructive shrink-0 mt-0.5" />
+              <p className="flex-1 text-xs font-mono text-destructive break-all">{networkError}</p>
+              <button onClick={onDismissError} className="text-destructive/60 hover:text-destructive shrink-0">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <ScrollArea className="flex-1 p-3 sm:p-4" ref={scrollRef}>
         <div className="space-y-4">
           <AnimatePresence initial={false}>
             {chatHistory?.map((msg: any) => {
               const isJustArrived = msg.role === "assistant" && msg.id === lastResponseId;
+              const isErrorMsg = msg.role === "assistant" && msg.content?.startsWith("⚠️");
               return (
                 <motion.div
                   key={msg.id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+                  className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
                 >
                   <span className="text-[10px] font-mono text-muted-foreground mb-1 uppercase tracking-widest">
-                    {msg.role === 'user' ? 'Operator' : 'Zarith'} // {format(new Date(msg.createdAt), 'HH:mm:ss')}
+                    {msg.role === "user" ? "Operator" : "Zarith"} // {format(new Date(msg.createdAt), "HH:mm:ss")}
                   </span>
                   <motion.div
                     animate={isJustArrived ? {
@@ -316,9 +366,11 @@ function ChatPanel({ chatHistory, isPending, input, setInput, onSend, scrollRef,
                     } : {}}
                     transition={{ duration: 2, ease: "easeOut" }}
                     className={`p-3 max-w-[85%] rounded-sm font-mono text-xs sm:text-sm break-words ${
-                      msg.role === 'user'
-                        ? 'bg-primary/10 border border-primary/30 text-primary'
-                        : 'bg-secondary/10 border border-secondary/30 text-secondary'
+                      msg.role === "user"
+                        ? "bg-primary/10 border border-primary/30 text-primary"
+                        : isErrorMsg
+                          ? "bg-destructive/10 border border-destructive/40 text-destructive"
+                          : "bg-secondary/10 border border-secondary/30 text-secondary"
                     }`}
                   >
                     {msg.content}
@@ -326,10 +378,13 @@ function ChatPanel({ chatHistory, isPending, input, setInput, onSend, scrollRef,
                 </motion.div>
               );
             })}
+
             {isPending && (
               <motion.div
+                key="pending"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
                 className="flex flex-col items-start"
               >
                 <span className="text-[10px] font-mono text-muted-foreground mb-1 uppercase tracking-widest">
@@ -346,7 +401,7 @@ function ChatPanel({ chatHistory, isPending, input, setInput, onSend, scrollRef,
                       />
                     ))}
                   </div>
-                  Processing directive...
+                  Processando diretiva...
                 </div>
               </motion.div>
             )}
@@ -367,20 +422,28 @@ function ChatPanel({ chatHistory, isPending, input, setInput, onSend, scrollRef,
             onBlur={() => setFocused(false)}
             placeholder="Enter command directive..."
             data-testid="input-chat"
-            className={`flex-1 bg-primary/5 font-mono text-primary placeholder:text-primary/30 rounded-sm h-10 sm:h-12 text-sm transition-all duration-300 ${
+            disabled={isPending}
+            className={`flex-1 bg-primary/5 font-mono text-primary placeholder:text-primary/30 rounded-sm h-10 sm:h-12 text-sm transition-all duration-300 disabled:opacity-60 ${
               focused
                 ? "border-primary shadow-[0_0_12px_rgba(0,255,255,0.25)] ring-1 ring-primary/30"
                 : "border-primary/30 focus-visible:ring-primary"
             }`}
-            disabled={isPending}
           />
           <Button
             type="submit"
             disabled={isPending || !input.trim()}
             data-testid="button-send-message"
-            className="h-10 sm:h-12 w-10 sm:w-12 p-0 bg-primary/10 text-primary border border-primary/50 hover:bg-primary hover:text-black rounded-sm transition-all shrink-0"
+            className="h-10 sm:h-12 w-10 sm:w-12 p-0 bg-primary/10 text-primary border border-primary/50 hover:bg-primary hover:text-black rounded-sm transition-all shrink-0 disabled:opacity-40"
           >
-            <Send className="w-4 h-4 sm:w-5 sm:h-5" />
+            {isPending ? (
+              <motion.div
+                className="w-3 h-3 rounded-full bg-primary"
+                animate={{ scale: [1, 1.3, 1] }}
+                transition={{ duration: 0.6, repeat: Infinity }}
+              />
+            ) : (
+              <Send className="w-4 h-4 sm:w-5 sm:h-5" />
+            )}
           </Button>
         </form>
       </div>

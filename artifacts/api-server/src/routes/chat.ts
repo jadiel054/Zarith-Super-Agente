@@ -1,12 +1,15 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { chatMessagesTable, activityLogTable } from "@workspace/db";
-import { desc } from "drizzle-orm";
+import { chatMessagesTable, activityLogTable, userSettingsTable } from "@workspace/db";
+import { desc, eq } from "drizzle-orm";
 import { SendMessageBody, GetChatHistoryQueryParams } from "@workspace/api-zod";
 import Groq from "groq-sdk";
 import { getConfig } from "../lib/config";
+import { logger } from "../lib/logger";
 
 const router = Router();
+
+const CHAT_TIMEOUT_MS = 10_000; // 10 seconds
 
 const ZARITH_SYSTEM_PROMPT = `Você é Zarith, a primeira Super-Agente Executiva e Assistente Pessoal autônoma, criada e concebida por Jadiel.
 
@@ -71,6 +74,23 @@ async function searchWeb(query: string): Promise<string | null> {
   }
 }
 
+// Load the effective Groq API key: DB key (per user) > env key
+async function resolveGroqKey(email: string | null): Promise<string> {
+  if (email) {
+    try {
+      const rows = await db
+        .select()
+        .from(userSettingsTable)
+        .where(eq(userSettingsTable.email, email));
+      const found = rows.find((r) => r.key === "groqApiKey");
+      if (found?.value) return found.value;
+    } catch (err) {
+      logger.warn({ err }, "Failed to read Groq key from DB, falling back to env");
+    }
+  }
+  return getConfig().groqApiKey;
+}
+
 router.post("/", async (req, res) => {
   const body = SendMessageBody.safeParse(req.body);
   if (!body.success) {
@@ -79,7 +99,9 @@ router.post("/", async (req, res) => {
   }
 
   const userContent = body.data.content;
+  const userEmail = (req.headers["x-user-email"] as string) || null;
 
+  // Insert user message immediately
   const [userMsg] = await db.insert(chatMessagesTable).values({
     role: "user",
     content: userContent,
@@ -93,6 +115,8 @@ router.post("/", async (req, res) => {
   });
 
   let aiContent = "";
+  let hadError = false;
+
   try {
     const recentMessages = await db
       .select()
@@ -114,25 +138,53 @@ router.post("/", async (req, res) => {
       }
     }
 
-    const config = getConfig();
-    const groq = new Groq({ apiKey: config.groqApiKey });
+    // Resolve key: user DB setting > env secret
+    const groqApiKey = await resolveGroqKey(userEmail);
 
-    const completion = await groq.chat.completions.create({
-      model: "llama3-70b-8192",
+    if (!groqApiKey) {
+      throw new Error("ZARITH: Nenhuma Groq API Key configurada. Acesse Configurações e adicione sua chave Groq.");
+    }
+
+    const groq = new Groq({ apiKey: groqApiKey });
+
+    // Filter history: only valid roles with non-empty content
+    const validHistory = historyMessages.filter(
+      (m) => (m.role === "user" || m.role === "assistant") && m.content?.trim()
+    );
+
+    const chatPromise = groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
       messages: [
         { role: "system", content: systemPrompt },
-        ...historyMessages,
+        ...validHistory,
       ],
       max_tokens: 1024,
       temperature: 0.7,
     });
 
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("AbortError")), CHAT_TIMEOUT_MS)
+    );
+
+    const completion = await Promise.race([chatPromise, timeoutPromise]);
+
     aiContent =
       completion.choices[0]?.message?.content ??
-      "ZARITH is processing your request. Please stand by.";
-  } catch (err) {
-    aiContent =
-      "ZARITH core is initializing. Groq integration active. Ready to execute your directives.";
+      "ZARITH está processando. Por favor aguarde.";
+  } catch (err: any) {
+    hadError = true;
+    const isTimeout = err?.name === "AbortError" || err?.code === "ERR_OPERATION_ABORTED" || err?.message === "AbortError";
+    const isAuthError = err?.status === 401 || err?.message?.includes("401") || err?.message?.includes("invalid_api_key");
+
+    if (isTimeout) {
+      aiContent = "⚠️ TIMEOUT: A Groq API não respondeu em 10 segundos. Verifique sua conexão ou tente novamente.";
+    } else if (isAuthError) {
+      aiContent = "⚠️ CHAVE INVÁLIDA: A Groq API Key está incorreta ou expirou. Acesse Configurações para atualizá-la.";
+    } else {
+      aiContent = `⚠️ ERRO: ${err?.message ?? "Falha desconhecida na comunicação com a API."}`;
+    }
+
+    logger.error({ err }, "Chat completion error");
   }
 
   const [assistantMsg] = await db.insert(chatMessagesTable).values({
@@ -144,7 +196,7 @@ router.post("/", async (req, res) => {
 
   await db.insert(activityLogTable).values({
     type: "agent_response",
-    description: `ZARITH responded: "${aiContent.substring(0, 80)}${aiContent.length > 80 ? "..." : ""}"`,
+    description: `ZARITH: "${aiContent.substring(0, 80)}${aiContent.length > 80 ? "..." : ""}"`,
   });
 
   res.json({
@@ -153,6 +205,7 @@ router.post("/", async (req, res) => {
     content: assistantMsg.content,
     createdAt: assistantMsg.createdAt.toISOString(),
     isThinking: assistantMsg.isThinking,
+    hadError,
   });
 });
 
