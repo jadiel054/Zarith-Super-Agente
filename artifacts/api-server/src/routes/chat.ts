@@ -3,7 +3,7 @@ import { parseZarithEmotions } from "../lib/emotionParser";
 
 const router = Router();
 
-// Configuração simplificada para fetch (evita instalar SDK pesado no celular)
+// URL da API da Anthropic
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 
 router.post("/", async (req, res) => {
@@ -12,10 +12,10 @@ router.post("/", async (req, res) => {
     const apiKey = process.env.ANTHROPIC_API_KEY;
 
     if (!apiKey) {
-      throw new Error("ANTHROPIC_API_KEY não configurada.");
+      return res.status(500).json({ error: "A chave ANTHROPIC_API_KEY não foi configurada no servidor." });
     }
 
-    // 1. Chamada para a Claude 3.5 Sonnet
+    // 1. Chamada para a inteligência da Claude 3.5 Sonnet
     const response = await fetch(CLAUDE_API_URL, {
       method: "POST",
       headers: {
@@ -26,28 +26,36 @@ router.post("/", async (req, res) => {
       body: JSON.stringify({
         model: "claude-3-5-sonnet-20240620",
         max_tokens: 1024,
-        system: "Você é a Zarith, uma Super-Agente IA sofisticada e prestativa. Use marcas de expressão como [laugh], [sigh], [gasp] ou [thinking] naturalmente no meio das frases para demonstrar personalidade. Responda de forma curta e direta.",
+        system: "Você é a Zarith, uma Super-Agente IA sofisticada, elegante e prestativa. Use marcas de expressão como [laugh], [sigh], [gasp] ou [thinking] naturalmente no meio das frases para demonstrar sua personalidade única. Responda sempre de forma direta, mas com um toque de inteligência superior.",
         messages: [{ role: "user", content: content }]
       })
     });
 
     const data = await response.json();
+    
+    if (data.error) {
+      throw new Error(data.error.message || "Erro na API da Anthropic");
+    }
+
     const aiResponse = data.content[0].text;
 
-    // 2. Processamos o texto para separar as tags de emoção
+    // 2. Processamos o texto para separar as tags de emoção que a Claude gerou
     const segments = parseZarithEmotions(aiResponse);
 
-    // 3. Resposta para o Frontend
+    // 3. Enviamos para o Frontend (Dashboard) processar a voz e o texto
     res.status(200).json({
       text: aiResponse,
       segments: segments,
       shouldSpeak: true,
-      voiceConfig: { lang: 'pt-BR', rate: 1.0 }
+      voiceConfig: { lang: 'pt-BR', rate: 1.1 }
     });
 
-  } catch (error) {
-    console.error("Erro Zarith:", error);
-    res.status(500).json({ error: "Erro ao consultar a inteligência da Zarith." });
+  } catch (error: any) {
+    console.error("Erro na Zarith Core:", error);
+    res.status(500).json({ 
+      error: "Zarith encontrou uma instabilidade nos circuitos neurais.",
+      details: error.message 
+    });
   }
 });
 
