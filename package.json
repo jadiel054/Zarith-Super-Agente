@@ -10,13 +10,17 @@
   },
   "private": true,
   "dependencies": {
-    "edge-tts": "^1.0.1",
-    "node-fetch": "^3.3.2",
     "@huggingface/inference": "^2.8.1",
+    "cors": "^2.8.6",
+    "edge-tts": "^1.0.1",
+    "express": "^5.2.1",
+    "node-fetch": "^3.3.2",
     "octokit": "^4.0.2"
   },
   "devDependencies": {
-    "typescript": "~5.9.2",
-    "prettier": "^3.8.1"
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "prettier": "^3.8.1",
+    "typescript": "~5.9.2"
   }
 }
