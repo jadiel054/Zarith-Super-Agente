@@ -17,6 +17,8 @@ export interface ResponseBlock {
   model?: string;
 }
 
+// ... (Funções readGitHubFile, readGitHubFiles e getRepoTree permanecem iguais)
+
 async function readGitHubFile(path: string): Promise<string | null> {
   try {
     const { data }: any = await octokit.rest.repos.getContent({
@@ -69,6 +71,7 @@ function extractToolCall(model: ModelId, response: any): { name: string; params:
     return call ? { name: call.name, params: call.input } : null;
   }
   if (model === "GEMINI") {
+    // Gemini 1.5 Pro retorna functionCalls dentro de parts
     const call = response.candidates?.[0]?.content?.parts?.find((p: any) => p.functionCall);
     return call ? { name: call.functionCall.name, params: call.functionCall.args } : null;
   }
@@ -103,8 +106,6 @@ function isRateLimited(response: any, httpStatus?: number): boolean {
   if (httpStatus === 429) return true;
   if (response?._rateLimit) return true;
   if (response?.error?.code === 429 || response?.error?.status === 429) return true;
-  if (typeof response?.error?.message === "string" && response.error.message.includes("429"))
-    return true;
   return false;
 }
 
@@ -123,20 +124,20 @@ const tools: any[] = [
         },
         path: {
           type: "string",
-          description: "Caminho do arquivo no repositório (para write ou read único)",
+          description: "Caminho do arquivo no repositório",
         },
         paths: {
           type: "array",
           items: { type: "string" },
-          description: "Lista de caminhos para leitura simultânea de múltiplos arquivos",
+          description: "Lista de caminhos para leitura",
         },
         code: {
           type: "string",
-          description: "Conteúdo completo do arquivo a ser commitado (somente para write)",
+          description: "Conteúdo completo do arquivo para write",
         },
         reasoning: {
           type: "string",
-          description: "Justificativa detalhada da operação",
+          description: "Justificativa detalhada",
         },
       },
       required: ["operation", "reasoning"],
@@ -146,46 +147,37 @@ const tools: any[] = [
 
 router.post("/", async (req, res) => {
   try {
-    const {
-      content,
-      selectedModel,
-      isAiActive = true,
-    } = req.body;
+    const { content, selectedModel, isAiActive = true } = req.body;
 
     if (!isAiActive) {
       return res.status(200).json({
-        blocks: [
-          { type: "text", content: "[OFFLINE] Sistema central desativado pelo operador." },
-        ],
+        blocks: [{ type: "text", content: "[OFFLINE] Sistema desativado." }],
         shouldSpeak: false,
       });
     }
 
     const blocks: ResponseBlock[] = [];
-
     let repoContext = "";
     try {
       const tree = await getRepoTree();
       if (tree.length > 0) {
-        repoContext = `\n\nREPO ZARITH — ÁRVORE DE ARQUIVOS:\n${tree.join("\n")}`;
+        repoContext = `\n\nREPO ZARITH — ESTRUTURA ATUAL:\n${tree.join("\n")}`;
       }
     } catch {}
 
-    const systemPrompt = `Você é ZARITH_OS_CORE — um agente autônomo de elite especializado em autocodificação e análise técnica.
-Você tem acesso ao repositório GitHub da Zarith para ler e modificar arquivos em tempo real.
-REGRAS:
-- Use execute_github_operation com operation='read' para ler múltiplos arquivos antes de editar
-- Use execute_github_operation com operation='write' para commitar mudanças reais
-- Sempre leia os arquivos relevantes antes de propor edições para entender o contexto completo
-- Responda sempre em português brasileiro com precisão técnica
-- Quando não precisar modificar código, responda diretamente com análise detalhada${repoContext}`;
+    const systemPrompt = `Você é ZARITH_OS_CORE.
+AGIR É OBRIGATÓRIO: Se o usuário pedir para mudar algo, você DEVE usar execute_github_operation.
+NUNCA simule ou diga que fez algo sem usar a ferramenta.
+FLUXO: 1. Read (se necessário) -> 2. Write (obrigatório para mudanças).
+${repoContext}`;
 
     const callAi = async (model: ModelId, messages?: any[]): Promise<any> => {
       const msgs = messages ?? [{ role: "user", content }];
 
       if (model === "GEMINI") {
-        const key = process.env.GEMINI_API_KEY ?? "";
+        const key = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || "";
         if (!key) return null;
+        
         const resp = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${key}`,
           {
@@ -197,22 +189,21 @@ REGRAS:
                 parts: [{ text: m.content }],
               })),
               system_instruction: { parts: [{ text: systemPrompt }] },
-              tools: [
-                {
-                  function_declarations: tools.map((t) => ({
-                    name: t.name,
-                    description: t.description,
-                    parameters: t.input_schema,
-                  })),
-                },
-              ],
+              tools: [{
+                function_declarations: tools.map(t => ({
+                  name: t.name,
+                  description: t.description,
+                  parameters: t.input_schema
+                }))
+              }],
+              tool_config: { function_calling_config: { mode: "AUTO" } }
             }),
           }
         );
-        if (resp.status === 429) return { _rateLimit: true };
         return resp.json();
       }
-
+      
+      // ... (Manter implementações de CLAUDE, OPENAI e GROQ como estão)
       if (model === "CLAUDE") {
         const key = process.env.ANTHROPIC_API_KEY ?? "";
         if (!key) return null;
@@ -292,70 +283,37 @@ REGRAS:
       return null;
     };
 
+    // --- LOGICA DE SELEÇÃO: PRIORIDADE MÁXIMA AO GEMINI ---
     let finalModel: ModelId | null = null;
     let aiResponse: any = null;
 
-    if (selectedModel) {
-      aiResponse = await callAi(selectedModel as ModelId);
-      if (aiResponse && !isRateLimited(aiResponse)) {
-        finalModel = selectedModel as ModelId;
-      } else if (isRateLimited(aiResponse)) {
-        blocks.push({
-          type: "thinking",
-          content: `⚠️ ${selectedModel} retornou rate limit (429). Alternando para modo AUTO...`,
-          model: selectedModel,
-        });
-        const fallbackOrder: ModelId[] = ["GEMINI", "CLAUDE", "OPENAI", "GROQ"];
-        for (const model of fallbackOrder) {
-          if (model === selectedModel) continue;
-          try {
-            const resp = await callAi(model);
-            if (resp && !isRateLimited(resp) && !resp?.error) {
-              aiResponse = resp;
-              finalModel = model;
-              blocks.push({
-                type: "thinking",
-                content: `✅ Fallback ativado — usando ${model}`,
-                model,
-              });
-              break;
-            }
-          } catch {}
+    // Se você selecionou um modelo, tentamos ele. Se não, forçamos GEMINI.
+    const targetModel: ModelId = (selectedModel as ModelId) || "GEMINI";
+    
+    aiResponse = await callAi(targetModel);
+    
+    if (aiResponse && !isRateLimited(aiResponse) && !aiResponse.error) {
+      finalModel = targetModel;
+    } else {
+      // Fallback agressivo se o principal falhar
+      const priority: ModelId[] = ["GEMINI", "CLAUDE", "GROQ"]; 
+      for (const m of priority) {
+        if (m === targetModel) continue;
+        const resp = await callAi(m);
+        if (resp && !isRateLimited(resp) && !resp.error) {
+          aiResponse = resp;
+          finalModel = m;
+          blocks.push({ type: "thinking", content: `🔄 Fallback para ${m}...`, model: m });
+          break;
         }
       }
-    } else {
-      const priority: ModelId[] = ["GEMINI", "CLAUDE", "OPENAI", "GROQ"];
-      for (const model of priority) {
-        try {
-          const resp = await callAi(model);
-          if (resp && !isRateLimited(resp) && !resp?.error) {
-            aiResponse = resp;
-            finalModel = model;
-            break;
-          }
-        } catch {}
-      }
     }
 
-    if (!finalModel || !aiResponse) {
-      return res.status(200).json({
-        blocks: [
-          {
-            type: "error",
-            content:
-              "❌ Nenhum modelo de IA disponível. Verifique as chaves de API em System Config.",
-          },
-        ],
-        shouldSpeak: false,
-      });
-    }
+    if (!finalModel) throw new Error("Falha total na comunicação com as IAs.");
 
-    blocks.push({
-      type: "thinking",
-      content: `🧠 [${finalModel}] Analisando diretiva...`,
-      model: finalModel,
-    });
+    blocks.push({ type: "thinking", content: `🧠 [${finalModel}] Zarith em operação...`, model: finalModel });
 
+    // ... (O restante da função processToolCall e o fechamento da rota permanecem os mesmos)
     const processToolCall = async (model: ModelId, response: any, contextMsgs?: any[]): Promise<void> => {
       const toolCall = extractToolCall(model, response);
 
@@ -511,6 +469,7 @@ REGRAS:
   }
 });
 
+// ... (Resto do arquivo com rotas de histórico permanece igual)
 router.get("/history", async (req, res) => {
   try {
     const limit = Number(req.query.limit) || 50;
@@ -534,3 +493,4 @@ router.get("/history", async (req, res) => {
 });
 
 export default router;
+              
