@@ -3,7 +3,7 @@ import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { setGlobalHeaders } from "@workspace/api-client-react";
+import { setGlobalHeaders, setBaseUrl } from "@workspace/api-client-react";
 
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
@@ -22,6 +22,20 @@ const queryClient = new QueryClient({
     mutations: { retry: 0 },
   },
 });
+
+// Configura a URL base da API em produção
+function ApiBaseUrlSync() {
+  useEffect(() => {
+    // Em produção (Vercel), a API está no mesmo domínio
+    // Em desenvolvimento, pode estar em localhost:8080
+    const apiUrl = import.meta.env.PROD
+      ? window.location.origin
+      : import.meta.env.VITE_API_URL || "http://localhost:8080";
+    setBaseUrl(apiUrl);
+  }, []);
+
+  return null;
+}
 
 // Keeps the X-User-Email header in sync with the current auth session
 function AuthHeaderSync() {
@@ -93,6 +107,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+          <ApiBaseUrlSync />
           <AuthHeaderSync />
           <Router />
         </WouterRouter>
