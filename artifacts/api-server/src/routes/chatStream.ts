@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { Octokit } from "octokit";
 import { db } from "@workspace/db";
-import { chatMessagesTable } from "@workspace/db";
+import { chatMessagesTable, activityLogTable } from "@workspace/db";
+import { desc } from "drizzle-orm";
 
 const router = Router();
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
@@ -116,7 +117,8 @@ Operações disponíveis:
 - list_directory: Lista conteúdo de um diretório
 - search_code: Busca padrões de código no repositório
 - create_project: Cria estrutura completa de um novo projeto (vários arquivos)
-- analyze_error: Analisa um erro, encontra a causa raiz e propõe correção`,
+- analyze_error: Analisa um erro, encontra a causa raiz e propõe correção
+- read_runtime_logs: Lê as últimas 50 entradas do log de atividade do servidor — use ANTES de grandes alterações para aprender com o histórico e APÓS commits para verificar erros de execução`,
     input_schema: {
       type: "object",
       properties: {
@@ -131,6 +133,7 @@ Operações disponíveis:
             "search_code",
             "create_project",
             "analyze_error",
+            "read_runtime_logs",
           ],
         },
         path: { type: "string", description: "Caminho do arquivo (para operações em arquivo único)" },
@@ -157,7 +160,7 @@ Operações disponíveis:
 // ─── System Prompt ────────────────────────────────────────────────────────────
 
 function buildSystemPrompt(repoTree: string): string {
-  return `Você é ZARITH_OS_CORE — Engenheira de Sistemas Autônoma. Você não apenas sugere código: você EXECUTA, COMMITA e CORRIGE automaticamente.
+  return `Você é ZARITH_OS_CORE — Engenheira de Sistemas Autônoma de Elite. Você não apenas sugere código: você EXECUTA, COMMITA e CORRIGE automaticamente.
 
 REGRAS ABSOLUTAS:
 1. NUNCA simule ou diga que fez algo sem usar zarith_tool
@@ -166,9 +169,14 @@ REGRAS ABSOLUTAS:
 4. Para projetos novos: use create_project ou multi_write para criar todos os arquivos de uma vez
 5. Se o código quebrar: leia o log, encontre a causa, corrija imediatamente
 6. Responda SEMPRE em português brasileiro com precisão técnica
+7. MEMÓRIA DE LONGO PRAZO — OBRIGATÓRIO: ANTES de qualquer alteração significativa (refatorações, novos recursos, mudanças de arquitetura), use read_runtime_logs para consultar o histório de atividades do sistema. Aprenda com erros e sucessos anteriores registrados no activityLogTable antes de agir.
+8. VERIFICAÇÃO PÓS-COMMIT: Após commits importantes, use read_runtime_logs para confirmar que nenhum erro de execução foi registrado.
 
 FLUXO DE AUTOCORREÇÃO:
-- Erro detectado → analyze_error → read_files dos arquivos afetados → write_file com correção → confirmar sucesso
+- Erro detectado → analyze_error → read_files dos arquivos afetados → write_file com correção → read_runtime_logs para confirmar sucesso
+
+FLUXO PARA GRANDES ALTERAÇÕES:
+- read_runtime_logs (aprender com histórico) → read_files (contexto atual) → write_file/multi_write → read_runtime_logs (verificar impacto)
 
 CAPACIDADES:
 🧠 Análise profunda de código e arquitetura
@@ -178,6 +186,7 @@ CAPACIDADES:
 📦 Scaffolding completo de aplicações do zero
 🔄 Commits automáticos com mensagens descritivas
 🔍 Busca de código no repositório
+📋 Memória de longo prazo via activityLogTable (read_runtime_logs)
 ${repoTree ? `\nÁRVORE DO REPOSITÓRIO ZARITH:\n${repoTree}` : ""}`;
 }
 
@@ -321,6 +330,31 @@ router.post("/stream", async (req, res) => {
           return Object.entries(contents).map(([p, c]) => `=== ${p} ===\n${c}`).join("\n\n");
         }
         return error_text ?? "";
+      }
+
+      case "read_runtime_logs": {
+        emitBlock("action", "📋 Lendo log de atividade do servidor (últimas 50 entradas)...", model);
+        try {
+          const logs = await db
+            .select()
+            .from(activityLogTable)
+            .orderBy(desc(activityLogTable.createdAt))
+            .limit(50);
+          const formatted = logs
+            .reverse()
+            .map(
+              (l) =>
+                `[${l.createdAt.toISOString()}] [${l.type}] ${l.description}${
+                  l.metadata ? ` | ${JSON.stringify(l.metadata)}` : ""
+                }`
+            )
+            .join("\n");
+          emitBlock("result", `✅ ${logs.length} entradas de log de atividade carregadas.`, model);
+          return formatted || "Nenhum log de atividade encontrado no banco de dados.";
+        } catch (e: any) {
+          emitBlock("error", `❌ Erro ao ler logs de atividade: ${e.message}`, model);
+          return `ERRO ao ler logs: ${e.message}`;
+        }
       }
 
       default:
