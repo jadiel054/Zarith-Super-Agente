@@ -44,12 +44,11 @@ const PROVIDERS: ProviderGroup[] = [
   {
     icon: <Cpu className="w-4 h-4 text-primary" />,
     title: "AI Models",
-    category: "LANGUAGE MODELS",
+    category: "LANGUAGE MODELS — GEMINI É O CORE PRINCIPAL",
     fields: [
-      { fieldKey: "groqApiKey", label: "Groq — Llama 3 70B", placeholder: "gsk_..." },
-      { fieldKey: "openaiApiKey", label: "OpenAI — ChatGPT", placeholder: "sk-..." },
-      { fieldKey: "anthropicApiKey", label: "Anthropic — Claude", placeholder: "sk-ant-..." },
-      { fieldKey: "geminiApiKey", label: "Google Gemini", placeholder: "AIza..." },
+      { fieldKey: "geminiApiKey", label: "Google Gemini 2.5 Flash — CORE PRINCIPAL", placeholder: "AIza..." },
+      { fieldKey: "anthropicApiKey", label: "Anthropic — Claude 3.5 (Fallback #1)", placeholder: "sk-ant-..." },
+      { fieldKey: "openaiApiKey", label: "OpenAI — GPT-4o (Fallback #2)", placeholder: "sk-..." },
     ],
   },
   {

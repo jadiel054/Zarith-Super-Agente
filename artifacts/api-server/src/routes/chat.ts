@@ -9,7 +9,8 @@ const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 const REPO_OWNER = "jadiel054";
 const REPO_NAME = "Zarith-Super-Agente";
 
-type ModelId = "GEMINI" | "CLAUDE" | "OPENAI" | "GROQ";
+// Groq removido — Gemini é o CORE PRINCIPAL
+type ModelId = "GEMINI" | "CLAUDE" | "OPENAI";
 
 export interface ResponseBlock {
   type: "thinking" | "action" | "result" | "text" | "error";
@@ -75,7 +76,7 @@ function extractToolCall(model: ModelId, response: any): { name: string; params:
     const call = response.candidates?.[0]?.content?.parts?.find((p: any) => p.functionCall);
     return call ? { name: call.functionCall.name, params: call.functionCall.args } : null;
   }
-  if (model === "OPENAI" || model === "GROQ") {
+  if (model === "OPENAI") {
     const call = response.choices?.[0]?.message?.tool_calls?.[0]?.function;
     if (call) {
       try {
@@ -97,7 +98,7 @@ function extractText(model: ModelId, response: any): string | null {
     return (
       response.candidates?.[0]?.content?.parts?.find((p: any) => p.text)?.text ?? null
     );
-  if (model === "OPENAI" || model === "GROQ")
+  if (model === "OPENAI")
     return response.choices?.[0]?.message?.content ?? null;
   return null;
 }
@@ -253,33 +254,6 @@ ${repoContext}`;
         return resp.json();
       }
 
-      if (model === "GROQ") {
-        const key = process.env.VITE_GROQ_API_KEY ?? process.env.GROQ_API_KEY ?? "";
-        if (!key) return null;
-        const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${key}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "llama-3.3-70b-versatile",
-            messages: [{ role: "system", content: systemPrompt }, ...msgs],
-            tools: tools.map((t) => ({
-              type: "function",
-              function: {
-                name: t.name,
-                description: t.description,
-                parameters: t.input_schema,
-              },
-            })),
-            tool_choice: "auto",
-          }),
-        });
-        if (resp.status === 429) return { _rateLimit: true };
-        return resp.json();
-      }
-
       return null;
     };
 
@@ -296,7 +270,7 @@ ${repoContext}`;
       finalModel = targetModel;
     } else {
       // Fallback agressivo se o principal falhar
-      const priority: ModelId[] = ["GEMINI", "CLAUDE", "GROQ"]; 
+      const priority: ModelId[] = ["GEMINI", "CLAUDE", "OPENAI"];
       for (const m of priority) {
         if (m === targetModel) continue;
         const resp = await callAi(m);

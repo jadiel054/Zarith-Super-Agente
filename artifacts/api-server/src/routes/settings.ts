@@ -6,15 +6,17 @@ import { getConfig, updateConfig, maskKey } from "../lib/config";
 
 const router = Router();
 
+// Groq removido — Gemini é o CORE PRINCIPAL
 const SETTING_KEYS = [
-  "groqApiKey",
+  "geminiApiKey",
   "openaiApiKey",
   "anthropicApiKey",
-  "geminiApiKey",
   "elevenLabsApiKey",
   "elevenLabsVoiceId",
   "googleMapsApiKey",
   "searchApiKey",
+  "githubToken",
+  "vercelToken",
 ] as const;
 
 type SettingKey = (typeof SETTING_KEYS)[number];
@@ -47,23 +49,20 @@ async function saveUserSetting(email: string, key: string, value: string | null)
   }
 }
 
-router.get("/", async (req, res) => {
-  const email = (req.headers["x-user-email"] as string) ?? "";
-  const config = getConfig();
-  const dbSettings = email ? await loadUserSettings(email) : {};
-
-  const effectiveGroq = dbSettings["groqApiKey"] ?? config.groqApiKey;
+function buildResponse(
+  config: ReturnType<typeof getConfig>,
+  dbSettings: Record<string, string | null>
+) {
   const effectiveGemini = dbSettings["geminiApiKey"] ?? config.geminiApiKey;
+  const effectiveGithub = dbSettings["githubToken"] ?? (config as any).githubToken;
 
-  res.json({
-    groqApiKey: maskKey(effectiveGroq),
-    groqApiKeySet: Boolean(effectiveGroq),
+  return {
+    geminiApiKey: maskKey(effectiveGemini),
+    geminiApiKeySet: Boolean(effectiveGemini),
     openaiApiKey: maskKey(dbSettings["openaiApiKey"] ?? null),
     openaiApiKeySet: Boolean(dbSettings["openaiApiKey"]),
     anthropicApiKey: maskKey(dbSettings["anthropicApiKey"] ?? null),
     anthropicApiKeySet: Boolean(dbSettings["anthropicApiKey"]),
-    geminiApiKey: maskKey(effectiveGemini),
-    geminiApiKeySet: Boolean(effectiveGemini),
     elevenLabsApiKey: maskKey(dbSettings["elevenLabsApiKey"] ?? null),
     elevenLabsApiKeySet: Boolean(dbSettings["elevenLabsApiKey"]),
     elevenLabsVoiceId: dbSettings["elevenLabsVoiceId"] ?? null,
@@ -72,7 +71,18 @@ router.get("/", async (req, res) => {
     googleMapsApiKeySet: Boolean(dbSettings["googleMapsApiKey"]),
     searchApiKey: maskKey(dbSettings["searchApiKey"] ?? null),
     searchApiKeySet: Boolean(dbSettings["searchApiKey"]),
-  });
+    githubToken: maskKey(effectiveGithub),
+    githubTokenSet: Boolean(effectiveGithub),
+    vercelToken: maskKey(dbSettings["vercelToken"] ?? null),
+    vercelTokenSet: Boolean(dbSettings["vercelToken"]),
+  };
+}
+
+router.get("/", async (req, res) => {
+  const email = (req.headers["x-user-email"] as string) ?? "";
+  const config = getConfig();
+  const dbSettings = email ? await loadUserSettings(email) : {};
+  res.json(buildResponse(config, dbSettings));
 });
 
 router.patch("/", async (req, res) => {
@@ -87,35 +97,14 @@ router.patch("/", async (req, res) => {
       await saveUserSetting(email, key, val);
     }
 
-    if (key === "groqApiKey" && val) updateConfig({ groqApiKey: val });
+    // Atualiza config em memória para uso imediato
     if (key === "geminiApiKey") updateConfig({ geminiApiKey: val });
+    if (key === "githubToken" && val) updateConfig({ githubToken: val } as any);
   }
 
   const config = getConfig();
   const dbSettings = email ? await loadUserSettings(email) : {};
-
-  const effectiveGroq = dbSettings["groqApiKey"] ?? config.groqApiKey;
-  const effectiveGemini = dbSettings["geminiApiKey"] ?? config.geminiApiKey;
-
-  res.json({
-    success: true,
-    groqApiKey: maskKey(effectiveGroq),
-    groqApiKeySet: Boolean(effectiveGroq),
-    openaiApiKey: maskKey(dbSettings["openaiApiKey"] ?? null),
-    openaiApiKeySet: Boolean(dbSettings["openaiApiKey"]),
-    anthropicApiKey: maskKey(dbSettings["anthropicApiKey"] ?? null),
-    anthropicApiKeySet: Boolean(dbSettings["anthropicApiKey"]),
-    geminiApiKey: maskKey(effectiveGemini),
-    geminiApiKeySet: Boolean(effectiveGemini),
-    elevenLabsApiKey: maskKey(dbSettings["elevenLabsApiKey"] ?? null),
-    elevenLabsApiKeySet: Boolean(dbSettings["elevenLabsApiKey"]),
-    elevenLabsVoiceId: dbSettings["elevenLabsVoiceId"] ?? null,
-    elevenLabsVoiceIdSet: Boolean(dbSettings["elevenLabsVoiceId"]),
-    googleMapsApiKey: maskKey(dbSettings["googleMapsApiKey"] ?? null),
-    googleMapsApiKeySet: Boolean(dbSettings["googleMapsApiKey"]),
-    searchApiKey: maskKey(dbSettings["searchApiKey"] ?? null),
-    searchApiKeySet: Boolean(dbSettings["searchApiKey"]),
-  });
+  res.json({ success: true, ...buildResponse(config, dbSettings) });
 });
 
 export default router;

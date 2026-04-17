@@ -1,11 +1,18 @@
+// Groq removido — Gemini é o CORE PRINCIPAL da Zarith
 interface ZarithConfig {
-  groqApiKey: string;
   geminiApiKey: string | null;
+  openaiApiKey: string | null;
+  anthropicApiKey: string | null;
+  githubToken: string | null;
+  vercelToken: string | null;
 }
 
 const _config: ZarithConfig = {
-  groqApiKey: process.env["GROQ_API_KEY"] ?? "",
   geminiApiKey: process.env["GEMINI_API_KEY"] ?? null,
+  openaiApiKey: process.env["OPENAI_API_KEY"] ?? null,
+  anthropicApiKey: process.env["ANTHROPIC_API_KEY"] ?? null,
+  githubToken: process.env["GITHUB_TOKEN"] ?? null,
+  vercelToken: process.env["VERCEL_TOKEN"] ?? null,
 };
 
 export function getConfig(): Readonly<ZarithConfig> {
@@ -13,8 +20,11 @@ export function getConfig(): Readonly<ZarithConfig> {
 }
 
 export function updateConfig(updates: Partial<ZarithConfig>): void {
-  if (updates.groqApiKey !== undefined) _config.groqApiKey = updates.groqApiKey;
   if (updates.geminiApiKey !== undefined) _config.geminiApiKey = updates.geminiApiKey;
+  if (updates.openaiApiKey !== undefined) _config.openaiApiKey = updates.openaiApiKey;
+  if (updates.anthropicApiKey !== undefined) _config.anthropicApiKey = updates.anthropicApiKey;
+  if (updates.githubToken !== undefined) _config.githubToken = updates.githubToken;
+  if (updates.vercelToken !== undefined) _config.vercelToken = updates.vercelToken;
 }
 
 export function maskKey(key: string | null): string | null {

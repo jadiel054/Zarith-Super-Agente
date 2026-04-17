@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
 interface OrbProps {
-  status: "idle" | "thinking" | "executing";
+  status: "idle" | "thinking" | "executing" | "speaking";
   className?: string;
   size?: "sm" | "md" | "lg";
 }
@@ -45,7 +45,8 @@ export function Orb({ status, className, size = "md" }: OrbProps) {
           "rounded-full backdrop-blur-md transition-all duration-500 relative",
           status === "idle" && "orb-idle bg-primary/10",
           status === "thinking" && "orb-thinking",
-          status === "executing" && "orb-idle bg-primary/20 shadow-[0_0_50px_10px_hsl(var(--primary)/0.6)]"
+          status === "executing" && "orb-idle bg-primary/20 shadow-[0_0_50px_10px_hsl(var(--primary)/0.6)]",
+          status === "speaking" && "bg-secondary/20 shadow-[0_0_60px_15px_hsl(var(--secondary)/0.5)] animate-pulse"
         )}
       >
         <div className="absolute inset-0 rounded-full border border-primary/30 mix-blend-overlay" />
@@ -59,9 +60,28 @@ export function Orb({ status, className, size = "md" }: OrbProps) {
             core,
             status === "thinking"
               ? "bg-secondary shadow-[0_0_20px_hsl(var(--secondary))] animate-pulse"
+              : status === "speaking"
+              ? "bg-secondary shadow-[0_0_30px_hsl(var(--secondary))] animate-bounce"
               : "bg-primary shadow-[0_0_20px_hsl(var(--primary))]"
           )}
         />
+        {/* Ondas de voz quando speaking */}
+        {status === "speaking" && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            {[1, 2, 3].map((i) => (
+              <span
+                key={i}
+                className="absolute rounded-full border border-secondary/30 animate-ping"
+                style={{
+                  width: `${30 + i * 20}%`,
+                  height: `${30 + i * 20}%`,
+                  animationDuration: `${0.8 + i * 0.3}s`,
+                  animationDelay: `${i * 0.15}s`,
+                }}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* HUD rings */}
