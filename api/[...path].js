@@ -1,8 +1,7 @@
-// @ts-nocheck
-import express, { Request, Response, NextFunction } from "express";
+import express from "express";
 import cors from "cors";
 // O caminho abaixo precisa existir no repositório para funcionar no runtime
-import router from "../artifacts/api-server/src/routes/index";
+import router from "../artifacts/api-server/src/routes/index.mjs"; 
 
 const app = express();
 
@@ -20,13 +19,12 @@ app.use(express.json({ limit: "10mb" }));
 // Rota principal
 app.use("/api", router);
 
-// Middleware de Erro com tipagem forçada para evitar o "Emit skipped"
-app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+// Middleware de Erro (JavaScript puro)
+app.use((err, req, res, next) => {
   const statusCode = err.status || err.statusCode || 500;
-  return (res as any).status(statusCode).json({ 
+  return res.status(statusCode).json({ 
     error: err.message || "Internal server error" 
   });
 });
 
 export default app;
-    
