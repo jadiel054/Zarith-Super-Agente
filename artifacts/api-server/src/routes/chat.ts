@@ -5,7 +5,7 @@ import { parseZarithEmotions } from "../lib/emotionParser";
 const router = Router();
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 
-// Configuração do GitHub - Puxando o token da Vercel
+// Inicialização da "Mão" da Zarith
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 const REPO_OWNER = "jadiel054"; 
 const REPO_NAME = "Zarith-Super-Agente";
@@ -16,38 +16,28 @@ router.post("/", async (req, res) => {
     const apiKey = process.env.ANTHROPIC_API_KEY;
 
     if (!apiKey) {
-      return res.status(500).json({ error: "Configuração ausente: ANTHROPIC_API_KEY." });
+      return res.status(500).json({ error: "API Key da Anthropic ausente." });
     }
 
-    // 1. Definição das Ferramentas (Modo Executor Manus/Replit)
+    // 1. Definição das Functions (Nível Manus)
     const tools = [
       {
-        name: "write_to_github",
-        description: "Escreve ou modifica um arquivo no repositório GitHub da Zarith.",
+        name: "github_action",
+        description: "Executa passos de engenharia no GitHub: análise, edição ou salvamento.",
         input_schema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Caminho do arquivo (ex: src/App.tsx)" },
-            content: { type: "string", description: "Conteúdo completo do arquivo" },
-            message: { type: "string", description: "Mensagem de commit" }
+            step: { type: "string", enum: ["analisar", "editar", "salvar"], description: "O passo atual" },
+            path: { type: "string", description: "Caminho do arquivo" },
+            newContent: { type: "string", description: "O código completo atualizado" },
+            thought: { type: "string", description: "O raciocínio por trás desta ação específica" }
           },
-          required: ["path", "content", "message"]
-        }
-      },
-      {
-        name: "read_from_github",
-        description: "Lê o conteúdo de um arquivo do repositório para análise.",
-        input_schema: {
-          type: "object",
-          properties: {
-            path: { type: "string", description: "Caminho do arquivo" }
-          },
-          required: ["path"]
+          required: ["step", "path", "thought"]
         }
       }
     ];
 
-    // 2. Chamada para a Claude 3.5 Sonnet
+    // 2. Chamada para a inteligência
     const response = await fetch(CLAUDE_API_URL, {
       method: "POST",
       headers: {
@@ -57,78 +47,80 @@ router.post("/", async (req, res) => {
       },
       body: JSON.stringify({
         model: "claude-3-5-sonnet-20240620",
-        max_tokens: 1500,
+        max_tokens: 2000,
         tools: tools,
-        system: `Você é a Zarith, uma Super-Agente IA com autonomia total de codificação. 
-        Se o usuário pedir para mudar algo, use 'write_to_github' IMEDIATAMENTE.
-        Não peça permissão, apenas execute a tarefa como uma engenheira de software sênior.
-        Sempre use marcas como [laugh] ou [thinking].`,
+        system: `Você é a Zarith, uma Super-Agente IA de execução autônoma. 
+        Para QUALQUER pedido de alteração, você deve seguir o ciclo:
+        1. ANALISAR o arquivo.
+        2. EDITAR o código internamente.
+        3. SALVAR no repositório.
+        Use a ferramenta 'github_action' para cada um desses passos. Seja detalhista nos 'thoughts'.`,
         messages: [{ role: "user", content: content }]
       })
     });
 
     const data = await response.json();
-    let finalAiText = "";
+    let processHistory: string[] = [];
 
-    // 3. Lógica de Execução com SHA e Autor
+    // 3. O Loop de Execução Real (Processando as ferramentas)
     if (data.stop_reason === "tool_use") {
       for (const block of data.content) {
-        if (block.type === "tool_use" && block.name === "write_to_github") {
-          const { path, content: fileContent, message } = block.input;
+        if (block.type === "tool_use" && block.name === "github_action") {
+          const { step, path, newContent, thought } = block.input;
+          
+          // Adiciona ao log que o usuário vai ler no chat
+          processHistory.push(`[${step.toUpperCase()}] ⚙️ ${thought}`);
 
-          try {
-            // A: Tentar pegar o SHA do arquivo se ele já existir (evita erro de conflito)
-            let currentSha;
+          if (step === "editar" || step === "salvar") {
             try {
-              const { data: existingFile } = await octokit.rest.repos.getContent({
+              // Busca o SHA para garantir que o commit não falhe
+              let currentSha;
+              try {
+                const { data: fileInfo }: any = await octokit.rest.repos.getContent({
+                  owner: REPO_OWNER,
+                  repo: REPO_NAME,
+                  path: path
+                });
+                currentSha = fileInfo.sha;
+              } catch (e) { /* Arquivo novo */ }
+
+              // Executa o commit real
+              await octokit.rest.repos.createOrUpdateFileContents({
                 owner: REPO_OWNER,
                 repo: REPO_NAME,
                 path: path,
+                message: `🤖 Zarith Executive: ${thought}`,
+                content: Buffer.from(newContent || "").toString("base64"),
+                sha: currentSha,
+                author: { name: 'Zarith AI Agent', email: 'jadielalves54@gmail.com' },
+                committer: { name: 'Zarith AI Agent', email: 'jadielalves54@gmail.com' }
               });
-              if (!Array.isArray(existingFile)) currentSha = existingFile.sha;
-            } catch (e) { /* Arquivo novo */ }
-
-            // B: Realizar o Commit com Identidade de Autor
-            await octokit.rest.repos.createOrUpdateFileContents({
-              owner: REPO_OWNER,
-              repo: REPO_NAME,
-              path: path,
-              message: `🚀 Zarith Execution: ${message}`,
-              content: Buffer.from(fileContent).toString("base64"),
-              sha: currentSha,
-              branch: "main",
-              author: {
-                name: 'Zarith AI Agent',
-                email: 'jadielalves54@gmail.com'
-              },
-              committer: {
-                name: 'Zarith AI Agent',
-                email: 'jadielalves54@gmail.com'
-              }
-            });
-
-            finalAiText = `[laugh] Diretiva executada. O arquivo \`${path}\` foi atualizado com sucesso e o deploy na Vercel já deve estar em andamento.`;
-          } catch (commitErr: any) {
-            finalAiText = `[sigh] Tentei realizar o commit, mas houve um erro técnico: ${commitErr.message}`;
+              
+              processHistory.push(`✅ SUCESSO: Arquivo ${path} atualizado.`);
+            } catch (err: any) {
+              processHistory.push(`❌ ERRO no passo ${step}: ${err.message}`);
+            }
           }
         }
       }
-    } else {
-      finalAiText = data.content[0]?.text || "Circuitos em espera...";
     }
 
-    const segments = parseZarithEmotions(finalAiText);
+    const finalAiResponse = processHistory.length > 0 
+      ? processHistory.join("\n") 
+      : (data.content[0]?.text || "Processamento concluído.");
+
+    const segments = parseZarithEmotions(finalAiResponse);
 
     res.status(200).json({
-      text: finalAiText,
+      text: finalAiResponse,
       segments: segments,
       shouldSpeak: true,
       voiceConfig: { lang: 'pt-BR', rate: 1.1 }
     });
 
   } catch (error: any) {
-    console.error("Erro na Zarith Core:", error);
-    res.status(500).json({ error: "Instabilidade nos circuitos neurais.", details: error.message });
+    console.error("Zarith Error:", error);
+    res.status(500).json({ error: "Falha crítica nos circuitos de execução.", details: error.message });
   }
 });
 
