@@ -12,7 +12,8 @@
   "dependencies": {
     "edge-tts": "^1.0.1",
     "node-fetch": "^3.3.2",
-    "@huggingface/inference": "^2.8.1"
+    "@huggingface/inference": "^2.8.1",
+    "octokit": "^4.0.2"
   },
   "devDependencies": {
     "typescript": "~5.9.2",
