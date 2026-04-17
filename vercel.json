@@ -1,0 +1,16 @@
+{
+  "buildCommand": "pnpm run build",
+  "installCommand": "pnpm install --no-frozen-lockfile",
+  "outputDirectory": "artifacts/zarith/dist/public",
+  "framework": "vite",
+  "nodeVersion": "22.x",
+  "env": {
+    "BASE_URL": "/"
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
