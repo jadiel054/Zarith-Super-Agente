@@ -646,7 +646,7 @@ function TasksTab() {
             Nenhuma tarefa criada
           </div>
         ) : (
-          tasks.map((task) => (
+          tasks.map((task: any) => (
             <div
               key={task.id}
               className={cn(

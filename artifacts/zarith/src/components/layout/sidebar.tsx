@@ -199,7 +199,7 @@ export function Sidebar({ onClose, lastMessageId }: SidebarProps) {
               </Link>
             </h2>
             <div className="space-y-1.5">
-              {recentTasks.map((task) => (
+              {recentTasks.map((task: any) => (
                 <Link
                   key={task.id}
                   href="/tasks"
