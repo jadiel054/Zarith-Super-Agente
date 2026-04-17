@@ -8,7 +8,7 @@ const isBuild = process.env.NODE_ENV === "production" || process.argv.includes("
 
 // PORT is only needed at dev/preview time, not during static build
 const rawPort = process.env.PORT;
-const port = rawPort && !Number.isNaN(Number(rawPort)) ? Number(rawPort) : 3000;
+const port = rawPort && !Number.isNaN(Number(rawPort)) ? Number(rawPort) : 5173;
 
 // BASE_PATH is set by Replit at runtime; for production static builds default to "/"
 const basePath = process.env.BASE_PATH ?? "/";
