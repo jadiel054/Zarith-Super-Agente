@@ -204,7 +204,7 @@ ${repoContext}`;
         return resp.json();
       }
       
-      // ... (Manter implementações de CLAUDE, OPENAI e GROQ como estão)
+      // Implementações de CLAUDE e OPENAI mantidas como fallback
       if (model === "CLAUDE") {
         const key = process.env.ANTHROPIC_API_KEY ?? "";
         if (!key) return null;
