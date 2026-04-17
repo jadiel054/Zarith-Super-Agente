@@ -1,154 +1,535 @@
 import { Router } from "express";
 import { Octokit } from "octokit";
-import { parseZarithEmotions } from "../lib/emotionParser";
+import { db } from "@workspace/db";
+import { chatMessagesTable } from "@workspace/db";
+import { desc } from "drizzle-orm";
 
 const router = Router();
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 const REPO_OWNER = "jadiel054";
 const REPO_NAME = "Zarith-Super-Agente";
 
+type ModelId = "GEMINI" | "CLAUDE" | "OPENAI" | "GROQ";
+
+export interface ResponseBlock {
+  type: "thinking" | "action" | "result" | "text" | "error";
+  content: string;
+  model?: string;
+}
+
+async function readGitHubFile(path: string): Promise<string | null> {
+  try {
+    const { data }: any = await octokit.rest.repos.getContent({
+      owner: REPO_OWNER,
+      repo: REPO_NAME,
+      path,
+    });
+    if (data.encoding === "base64") {
+      return Buffer.from(data.content.replace(/\n/g, ""), "base64").toString("utf-8");
+    }
+    return data.content ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function readGitHubFiles(paths: string[]): Promise<Record<string, string>> {
+  const results: Record<string, string> = {};
+  await Promise.all(
+    paths.map(async (p) => {
+      const content = await readGitHubFile(p);
+      if (content) results[p] = content;
+    })
+  );
+  return results;
+}
+
+async function getRepoTree(): Promise<string[]> {
+  try {
+    const { data } = await octokit.rest.git.getTree({
+      owner: REPO_OWNER,
+      repo: REPO_NAME,
+      tree_sha: "HEAD",
+      recursive: "1",
+    });
+    return data.tree
+      .filter((item) => item.type === "blob" && item.path)
+      .map((item) => item.path!)
+      .filter(Boolean)
+      .slice(0, 80);
+  } catch {
+    return [];
+  }
+}
+
+function extractToolCall(model: ModelId, response: any): { name: string; params: any } | null {
+  if (!response) return null;
+  if (model === "CLAUDE") {
+    const call = response.content?.find((b: any) => b.type === "tool_use");
+    return call ? { name: call.name, params: call.input } : null;
+  }
+  if (model === "GEMINI") {
+    const call = response.candidates?.[0]?.content?.parts?.find((p: any) => p.functionCall);
+    return call ? { name: call.functionCall.name, params: call.functionCall.args } : null;
+  }
+  if (model === "OPENAI" || model === "GROQ") {
+    const call = response.choices?.[0]?.message?.tool_calls?.[0]?.function;
+    if (call) {
+      try {
+        return { name: call.name, params: JSON.parse(call.arguments) };
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+  return null;
+}
+
+function extractText(model: ModelId, response: any): string | null {
+  if (!response) return null;
+  if (model === "CLAUDE")
+    return response.content?.find((b: any) => b.type === "text")?.text ?? null;
+  if (model === "GEMINI")
+    return (
+      response.candidates?.[0]?.content?.parts?.find((p: any) => p.text)?.text ?? null
+    );
+  if (model === "OPENAI" || model === "GROQ")
+    return response.choices?.[0]?.message?.content ?? null;
+  return null;
+}
+
+function isRateLimited(response: any, httpStatus?: number): boolean {
+  if (httpStatus === 429) return true;
+  if (response?._rateLimit) return true;
+  if (response?.error?.code === 429 || response?.error?.status === 429) return true;
+  if (typeof response?.error?.message === "string" && response.error.message.includes("429"))
+    return true;
+  return false;
+}
+
+const tools: any[] = [
+  {
+    name: "execute_github_operation",
+    description:
+      "Lê e/ou modifica arquivos reais no repositório GitHub da Zarith. Use 'read' primeiro para entender o contexto, depois 'write' para commitar mudanças.",
+    input_schema: {
+      type: "object",
+      properties: {
+        operation: {
+          type: "string",
+          enum: ["write", "read"],
+          description: "Use 'read' para ler arquivos, 'write' para commitar código",
+        },
+        path: {
+          type: "string",
+          description: "Caminho do arquivo no repositório (para write ou read único)",
+        },
+        paths: {
+          type: "array",
+          items: { type: "string" },
+          description: "Lista de caminhos para leitura simultânea de múltiplos arquivos",
+        },
+        code: {
+          type: "string",
+          description: "Conteúdo completo do arquivo a ser commitado (somente para write)",
+        },
+        reasoning: {
+          type: "string",
+          description: "Justificativa detalhada da operação",
+        },
+      },
+      required: ["operation", "reasoning"],
+    },
+  },
+];
+
 router.post("/", async (req, res) => {
   try {
-    const { content, selectedModel, isAiActive } = req.body;
+    const {
+      content,
+      selectedModel,
+      isAiActive = true,
+    } = req.body;
 
-    // 1. KILL SWITCH: Se o botão geral de ativação estiver off, para tudo.
     if (!isAiActive) {
-      return res.status(200).json({ text: "[OFFLINE] Sistema central desativado.", shouldSpeak: false });
+      return res.status(200).json({
+        blocks: [
+          { type: "text", content: "[OFFLINE] Sistema central desativado pelo operador." },
+        ],
+        shouldSpeak: false,
+      });
     }
 
-    // 2. LÓGICA DE SELEÇÃO INTELIGENTE (A regra que você pediu)
-    // Se não houver um modelo selecionado (vazio ou null), forçamos o Modo AUTO.
-    let isAutoMode = !selectedModel; 
-    let modelToUse = selectedModel;
+    const blocks: ResponseBlock[] = [];
 
-    const tools: any[] = [{
-      name: "execute_github_operation",
-      description: "AÇÃO OBRIGATÓRIA: Altera arquivos reais no GitHub. Não simule.",
-      input_schema: {
-        type: "object",
-        properties: {
-          operation: { type: "string", enum: ["write"] },
-          path: { type: "string" },
-          code: { type: "string" },
-          reasoning: { type: "string" }
-        },
-        required: ["operation", "path", "reasoning", "code"]
+    let repoContext = "";
+    try {
+      const tree = await getRepoTree();
+      if (tree.length > 0) {
+        repoContext = `\n\nREPO ZARITH — ÁRVORE DE ARQUIVOS:\n${tree.join("\n")}`;
       }
-    }];
+    } catch {}
 
-    const systemPrompt = `Você é o ZARITH_OS_CORE. Use a ferramenta 'execute_github_operation' para mudanças.`;
+    const systemPrompt = `Você é ZARITH_OS_CORE — um agente autônomo de elite especializado em autocodificação e análise técnica.
+Você tem acesso ao repositório GitHub da Zarith para ler e modificar arquivos em tempo real.
+REGRAS:
+- Use execute_github_operation com operation='read' para ler múltiplos arquivos antes de editar
+- Use execute_github_operation com operation='write' para commitar mudanças reais
+- Sempre leia os arquivos relevantes antes de propor edições para entender o contexto completo
+- Responda sempre em português brasileiro com precisão técnica
+- Quando não precisar modificar código, responda diretamente com análise detalhada${repoContext}`;
 
-    // Função auxiliar para chamar as APIs (Abstração)
-    const callAi = async (m: string) => {
-      if (m === 'CLAUDE') {
-        return await fetch("https://api.anthropic.com/v1/messages", {
+    const callAi = async (model: ModelId, messages?: any[]): Promise<any> => {
+      const msgs = messages ?? [{ role: "user", content }];
+
+      if (model === "GEMINI") {
+        const key = process.env.GEMINI_API_KEY ?? "";
+        if (!key) return null;
+        const resp = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${key}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: msgs.map((m) => ({
+                role: m.role === "assistant" ? "model" : "user",
+                parts: [{ text: m.content }],
+              })),
+              system_instruction: { parts: [{ text: systemPrompt }] },
+              tools: [
+                {
+                  function_declarations: tools.map((t) => ({
+                    name: t.name,
+                    description: t.description,
+                    parameters: t.input_schema,
+                  })),
+                },
+              ],
+            }),
+          }
+        );
+        if (resp.status === 429) return { _rateLimit: true };
+        return resp.json();
+      }
+
+      if (model === "CLAUDE") {
+        const key = process.env.ANTHROPIC_API_KEY ?? "";
+        if (!key) return null;
+        const resp = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY!, "anthropic-version": "2023-06-01" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+          },
           body: JSON.stringify({
             model: "claude-3-5-sonnet-20240620",
-            max_tokens: 2500,
+            max_tokens: 4096,
             tools,
-            tool_choice: { type: "tool", name: "execute_github_operation" },
             system: systemPrompt,
-            messages: [{ role: "user", content }]
-          })
-        }).then(r => r.json());
+            messages: msgs,
+          }),
+        });
+        if (resp.status === 429) return { _rateLimit: true };
+        return resp.json();
       }
-      if (m === 'GEMINI') {
-        return await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+
+      if (model === "OPENAI") {
+        const key = process.env.OPENAI_API_KEY ?? "";
+        if (!key) return null;
+        const resp = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            Authorization: `Bearer ${key}`,
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: content }] }],
-            system_instruction: { parts: [{ text: systemPrompt }] },
-            tools: [{ function_declarations: tools.map(t => ({ name: t.name, description: t.description, parameters: t.input_schema })) }]
-          })
-        }).then(r => r.json());
+            model: "gpt-4o",
+            messages: [{ role: "system", content: systemPrompt }, ...msgs],
+            tools: tools.map((t) => ({
+              type: "function",
+              function: {
+                name: t.name,
+                description: t.description,
+                parameters: t.input_schema,
+              },
+            })),
+            tool_choice: "auto",
+          }),
+        });
+        if (resp.status === 429) return { _rateLimit: true };
+        return resp.json();
       }
-      if (m === 'GROQ') {
-        return await fetch("https://api.groq.com/openai/v1/chat/completions", {
+
+      if (model === "GROQ") {
+        const key = process.env.VITE_GROQ_API_KEY ?? process.env.GROQ_API_KEY ?? "";
+        if (!key) return null;
+        const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
-          headers: { "Authorization": `Bearer ${process.env.VITE_GROQ_API_KEY}`, "Content-Type": "application/json" },
+          headers: {
+            Authorization: `Bearer ${key}`,
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({
             model: "llama-3.3-70b-versatile",
-            messages: [{ role: "system", content: systemPrompt }, { role: "user", content }],
-            tools: tools.map(t => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.input_schema } })),
-            tool_choice: "auto"
-          })
-        }).then(r => r.json());
+            messages: [{ role: "system", content: systemPrompt }, ...msgs],
+            tools: tools.map((t) => ({
+              type: "function",
+              function: {
+                name: t.name,
+                description: t.description,
+                parameters: t.input_schema,
+              },
+            })),
+            tool_choice: "auto",
+          }),
+        });
+        if (resp.status === 429) return { _rateLimit: true };
+        return resp.json();
       }
+
       return null;
     };
 
-    // 3. EXECUÇÃO DO FLUXO
+    let finalModel: ModelId | null = null;
     let aiResponse: any = null;
-    let finalModel = '';
 
-    if (isAutoMode) {
-      // Prioridade de Fallback: Claude -> Gemini -> Groq
-      const priority = ['CLAUDE', 'GEMINI', 'GROQ'];
-      for (const p of priority) {
+    if (selectedModel) {
+      aiResponse = await callAi(selectedModel as ModelId);
+      if (aiResponse && !isRateLimited(aiResponse)) {
+        finalModel = selectedModel as ModelId;
+      } else if (isRateLimited(aiResponse)) {
+        blocks.push({
+          type: "thinking",
+          content: `⚠️ ${selectedModel} retornou rate limit (429). Alternando para modo AUTO...`,
+          model: selectedModel,
+        });
+        const fallbackOrder: ModelId[] = ["GEMINI", "CLAUDE", "OPENAI", "GROQ"];
+        for (const model of fallbackOrder) {
+          if (model === selectedModel) continue;
+          try {
+            const resp = await callAi(model);
+            if (resp && !isRateLimited(resp) && !resp?.error) {
+              aiResponse = resp;
+              finalModel = model;
+              blocks.push({
+                type: "thinking",
+                content: `✅ Fallback ativado — usando ${model}`,
+                model,
+              });
+              break;
+            }
+          } catch {}
+        }
+      }
+    } else {
+      const priority: ModelId[] = ["GEMINI", "CLAUDE", "OPENAI", "GROQ"];
+      for (const model of priority) {
         try {
-          aiResponse = await callAi(p);
-          if (aiResponse && !aiResponse.error) {
-            finalModel = p;
+          const resp = await callAi(model);
+          if (resp && !isRateLimited(resp) && !resp?.error) {
+            aiResponse = resp;
+            finalModel = model;
             break;
           }
-        } catch (e) { continue; }
+        } catch {}
       }
-    } else {
-      // Modo Manual (Exclusivo)
-      aiResponse = await callAi(modelToUse);
-      finalModel = modelToUse;
     }
 
-    // 4. PROCESSADOR DE COMMITS UNIFICADO
-    let logs: string[] = [];
-    let execParams: any = null;
-
-    if (finalModel === 'CLAUDE') {
-      const call = aiResponse.content?.find((b: any) => b.type === "tool_use");
-      if (call) execParams = call.input;
-    } else if (finalModel === 'GEMINI') {
-      const call = aiResponse.candidates?.[0]?.content?.parts?.find((p: any) => p.functionCall);
-      if (call) execParams = call.functionCall.args;
-    } else if (finalModel === 'GROQ') {
-      const call = aiResponse.choices?.[0]?.message?.tool_calls?.[0]?.function;
-      if (call) execParams = JSON.parse(call.arguments);
+    if (!finalModel || !aiResponse) {
+      return res.status(200).json({
+        blocks: [
+          {
+            type: "error",
+            content:
+              "❌ Nenhum modelo de IA disponível. Verifique as chaves de API em System Config.",
+          },
+        ],
+        shouldSpeak: false,
+      });
     }
 
-    if (execParams) {
-      const { path, code, reasoning } = execParams;
-      logs.push(`[${finalModel}] 🧠 ${reasoning}`);
-      try {
-        let currentSha;
-        try {
-          const { data: file }: any = await octokit.rest.repos.getContent({ owner: REPO_OWNER, repo: REPO_NAME, path });
-          currentSha = file.sha;
-        } catch (e) {}
+    blocks.push({
+      type: "thinking",
+      content: `🧠 [${finalModel}] Analisando diretiva...`,
+      model: finalModel,
+    });
 
-        await octokit.rest.repos.createOrUpdateFileContents({
-          owner: REPO_OWNER, repo: REPO_NAME, path,
-          message: `🤖 Zarith Elite (${finalModel}): ${reasoning}`,
-          content: Buffer.from(code).toString("base64"),
-          sha: currentSha,
-          author: { name: 'Zarith AI Agent', email: 'jadielalves54@gmail.com' }
+    const processToolCall = async (model: ModelId, response: any, contextMsgs?: any[]): Promise<void> => {
+      const toolCall = extractToolCall(model, response);
+
+      if (!toolCall || toolCall.name !== "execute_github_operation") {
+        const text = extractText(model, response);
+        blocks.push({
+          type: "text",
+          content: text || "Resposta sem conteúdo.",
+          model,
         });
-        logs.push(`[GITHUB] ✅ Sucesso via ${finalModel}.`);
-      } catch (err: any) {
-        logs.push(`[ERRO GITHUB] ❌ ${err.message}`);
+        return;
       }
-    } else {
-      const text = finalModel === 'CLAUDE' ? aiResponse?.content?.[0]?.text :
-                   finalModel === 'GEMINI' ? aiResponse?.candidates?.[0]?.content?.parts?.[0]?.text :
-                   aiResponse?.choices?.[0]?.message?.content;
-      logs.push(text || "Erro de processamento.");
-    }
 
-    res.status(200).json({ text: logs.join("\n"), shouldSpeak: true });
+      const { operation, path, paths, code, reasoning } = toolCall.params;
 
+      if (reasoning) {
+        blocks.push({
+          type: "thinking",
+          content: `💡 ${reasoning}`,
+          model,
+        });
+      }
+
+      if (operation === "read") {
+        const filesToRead: string[] = paths ?? (path ? [path] : []);
+
+        if (filesToRead.length === 0) {
+          blocks.push({
+            type: "error",
+            content: "❌ Operação de leitura sem caminhos especificados.",
+            model,
+          });
+          return;
+        }
+
+        blocks.push({
+          type: "action",
+          content: `📖 Lendo ${filesToRead.length} arquivo(s): ${filesToRead.join(", ")}`,
+          model,
+        });
+
+        const fileContents = await readGitHubFiles(filesToRead);
+        const foundCount = Object.keys(fileContents).length;
+
+        blocks.push({
+          type: "result",
+          content: `✅ ${foundCount}/${filesToRead.length} arquivo(s) carregado(s) — gerando análise contextualizada...`,
+          model,
+        });
+
+        const contextText = Object.entries(fileContents)
+          .map(([p, c]) => `=== FILE: ${p} ===\n\`\`\`\n${c}\n\`\`\``)
+          .join("\n\n");
+
+        const followUpMsgs = [
+          { role: "user", content },
+          {
+            role: "assistant",
+            content: `Li e analisei os seguintes arquivos do repositório:\n\n${contextText}`,
+          },
+          {
+            role: "user",
+            content:
+              "Com base nos arquivos lidos, implemente as mudanças necessárias ou forneça sua análise completa.",
+          },
+        ];
+
+        const secondResponse = await callAi(model, followUpMsgs);
+        if (secondResponse && !isRateLimited(secondResponse)) {
+          await processToolCall(model, secondResponse, followUpMsgs);
+        }
+      } else if (operation === "write") {
+        if (!path || !code) {
+          blocks.push({
+            type: "error",
+            content: "❌ Operação de escrita sem path ou code definidos.",
+            model,
+          });
+          return;
+        }
+
+        blocks.push({
+          type: "action",
+          content: `✏️ Commitando alterações em: ${path}`,
+          model,
+        });
+
+        try {
+          let currentSha: string | undefined;
+          try {
+            const { data: file }: any = await octokit.rest.repos.getContent({
+              owner: REPO_OWNER,
+              repo: REPO_NAME,
+              path,
+            });
+            currentSha = (file as any).sha;
+          } catch {}
+
+          await octokit.rest.repos.createOrUpdateFileContents({
+            owner: REPO_OWNER,
+            repo: REPO_NAME,
+            path,
+            message: `🤖 Zarith Elite (${model}): ${reasoning ?? "Auto-update"}`,
+            content: Buffer.from(code).toString("base64"),
+            sha: currentSha,
+            author: {
+              name: "Zarith AI Agent",
+              email: "jadielalves54@gmail.com",
+            },
+          });
+
+          blocks.push({
+            type: "result",
+            content: `✅ [GITHUB] Commit realizado com sucesso em \`${path}\``,
+            model,
+          });
+        } catch (err: any) {
+          blocks.push({
+            type: "error",
+            content: `❌ [GITHUB] Falha no commit: ${err.message}`,
+            model,
+          });
+        }
+      }
+    };
+
+    await processToolCall(finalModel, aiResponse);
+
+    const textBlocks = blocks.filter((b) => b.type === "text" || b.type === "result");
+    const textForSpeech =
+      textBlocks.length > 0 ? textBlocks[textBlocks.length - 1].content : "";
+
+    try {
+      await db.insert(chatMessagesTable).values({
+        role: "user",
+        content,
+        isThinking: false,
+      });
+      await db.insert(chatMessagesTable).values({
+        role: "assistant",
+        content: JSON.stringify(blocks),
+        isThinking: false,
+      });
+    } catch {}
+
+    res.status(200).json({
+      blocks,
+      text: textForSpeech,
+      shouldSpeak: textBlocks.length > 0,
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+router.get("/history", async (req, res) => {
+  try {
+    const limit = Number(req.query.limit) || 50;
+    const messages = await db
+      .select()
+      .from(chatMessagesTable)
+      .orderBy(desc(chatMessagesTable.createdAt))
+      .limit(limit);
+
+    res.json(
+      messages.reverse().map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        createdAt: m.createdAt.toISOString(),
+      }))
+    );
+  } catch {
+    res.json([]);
   }
 });
 
