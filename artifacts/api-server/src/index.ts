@@ -1,29 +1,31 @@
-import express, { Request, Response, NextFunction } from 'express';
-import cors from 'cors';
+import express, { type Request, type Response, type NextFunction } from "express";
+import cors from "cors";
+import { logger } from "./lib/logger";
+import router from "./routes/index";
 
 const app = express();
 
-// Middleware básico de JSON (nativo do Express, não precisa de body-parser)
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-User-Email"],
+}));
 
-// Rota de teste
-app.get('/health', (req: Request, res: Response) => {
-  res.status(200).json({ status: "Zarith Online", engine: "Claude-3.5-Sonnet" });
-});
+app.use(express.json({ limit: "10mb" }));
 
-// --- MIDDLEWARE DE ERRO QUE A ZARITH SUGERIU ---
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error('❌ [Zarith Monitor]:', err.stack);
-  res.status(err.statusCode || 500).json({
-    success: false,
-    message: err.message || 'Erro interno no sistema da Zarith.'
+app.use("/api", router);
+
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  logger.error(err, "Unhandled error");
+  res.status(err.status ?? err.statusCode ?? 500).json({
+    error: err.message ?? "Internal server error",
   });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor da Zarith ativo na porta ${PORT}`);
+const PORT = Number(process.env.PORT ?? 8080);
+app.listen(PORT, "0.0.0.0", () => {
+  logger.info(`🚀 Servidor da Zarith ativo na porta ${PORT}`);
 });
 
 export default app;
