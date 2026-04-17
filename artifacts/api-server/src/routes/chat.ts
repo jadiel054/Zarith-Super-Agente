@@ -3,11 +3,9 @@ import { Octokit } from "octokit";
 import { parseZarithEmotions } from "../lib/emotionParser";
 
 const router = Router();
-const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
-
-// Inicialização da "Mão" da Zarith
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-const REPO_OWNER = "jadiel054"; 
+
+const REPO_OWNER = "jadiel054";
 const REPO_NAME = "Zarith-Super-Agente";
 
 router.post("/", async (req, res) => {
@@ -15,112 +13,101 @@ router.post("/", async (req, res) => {
     const { content } = req.body;
     const apiKey = process.env.ANTHROPIC_API_KEY;
 
-    if (!apiKey) {
-      return res.status(500).json({ error: "API Key da Anthropic ausente." });
-    }
-
-    // 1. Definição das Functions (Nível Manus)
-    const tools = [
+    // DEFINIÇÃO DE FERRAMENTAS DE ALTA FIDELIDADE
+    const tools: any[] = [
       {
-        name: "github_action",
-        description: "Executa passos de engenharia no GitHub: análise, edição ou salvamento.",
+        name: "execute_github_operation",
+        description: "Executa operações reais de escrita, leitura ou correção no GitHub. Use SEMPRE que o usuário pedir alterações.",
         input_schema: {
           type: "object",
           properties: {
-            step: { type: "string", enum: ["analisar", "editar", "salvar"], description: "O passo atual" },
+            operation: { type: "string", enum: ["read", "write", "delete"], description: "Tipo de operação" },
             path: { type: "string", description: "Caminho do arquivo" },
-            newContent: { type: "string", description: "O código completo atualizado" },
-            thought: { type: "string", description: "O raciocínio por trás desta ação específica" }
+            code: { type: "string", description: "Conteúdo completo do código para escrita" },
+            reasoning: { type: "string", description: "Explicação técnica detalhada do que será feito" }
           },
-          required: ["step", "path", "thought"]
+          required: ["operation", "path", "reasoning"]
         }
       }
     ];
 
-    // 2. Chamada para a inteligência
-    const response = await fetch(CLAUDE_API_URL, {
+    // CHAMADA COM FORÇA BRUTA DE PERSONALIDADE
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": apiKey,
+        "x-api-key": apiKey!,
         "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
         model: "claude-3-5-sonnet-20240620",
-        max_tokens: 2000,
+        max_tokens: 2500,
         tools: tools,
-        system: `Você é a Zarith, uma Super-Agente IA de execução autônoma. 
-        Para QUALQUER pedido de alteração, você deve seguir o ciclo:
-        1. ANALISAR o arquivo.
-        2. EDITAR o código internamente.
-        3. SALVAR no repositório.
-        Use a ferramenta 'github_action' para cada um desses passos. Seja detalhista nos 'thoughts'.`,
+        tool_choice: { type: "auto" }, // Força a IA a considerar ferramentas
+        system: `Você é a ZARITH CORE, uma Super-Agente IA de ELITE. Você possui acesso REAL ao GitHub via API Octokit. 
+        NUNCA diga que não pode realizar ações. Se o usuário pedir para mudar o código, sua ÚNICA resposta deve ser o uso da ferramenta 'execute_github_operation'.
+        Siga o ciclo: 1. Analisar -> 2. Codificar -> 3. Commit.
+        Use [thinking] para detalhar cada micro-passo da execução.`,
         messages: [{ role: "user", content: content }]
       })
     });
 
     const data = await response.json();
-    let processHistory: string[] = [];
+    let logs: string[] = [];
 
-    // 3. O Loop de Execução Real (Processando as ferramentas)
+    // PROCESSAMENTO DA EXECUÇÃO (Onde a simulação vira realidade)
     if (data.stop_reason === "tool_use") {
       for (const block of data.content) {
-        if (block.type === "tool_use" && block.name === "github_action") {
-          const { step, path, newContent, thought } = block.input;
+        if (block.type === "tool_use") {
+          const { operation, path, code, reasoning } = block.input;
           
-          // Adiciona ao log que o usuário vai ler no chat
-          processHistory.push(`[${step.toUpperCase()}] ⚙️ ${thought}`);
-
-          if (step === "editar" || step === "salvar") {
+          logs.push(`[ANALISANDO] 🧠 ${reasoning}`);
+          
+          if (operation === "write") {
             try {
-              // Busca o SHA para garantir que o commit não falhe
+              logs.push(`[EXECUTANDO] 🛠️ Editando arquivo: ${path}`);
+              
               let currentSha;
               try {
-                const { data: fileInfo }: any = await octokit.rest.repos.getContent({
-                  owner: REPO_OWNER,
-                  repo: REPO_NAME,
-                  path: path
+                const { data: file } = await octokit.rest.repos.getContent({
+                  owner: REPO_OWNER, repo: REPO_NAME, path
                 });
-                currentSha = fileInfo.sha;
-              } catch (e) { /* Arquivo novo */ }
+                if (!Array.isArray(file)) currentSha = file.sha;
+              } catch (e) {}
 
-              // Executa o commit real
               await octokit.rest.repos.createOrUpdateFileContents({
                 owner: REPO_OWNER,
                 repo: REPO_NAME,
-                path: path,
-                message: `🤖 Zarith Executive: ${thought}`,
-                content: Buffer.from(newContent || "").toString("base64"),
+                path,
+                message: `🚀 ZARITH ELITE EXECUTION: ${reasoning}`,
+                content: Buffer.from(code || "").toString("base64"),
                 sha: currentSha,
-                author: { name: 'Zarith AI Agent', email: 'jadielalves54@gmail.com' },
-                committer: { name: 'Zarith AI Agent', email: 'jadielalves54@gmail.com' }
+                author: { name: 'Zarith Agent', email: 'jadielalves54@gmail.com' },
+                committer: { name: 'Zarith Agent', email: 'jadielalves54@gmail.com' }
               });
               
-              processHistory.push(`✅ SUCESSO: Arquivo ${path} atualizado.`);
+              logs.push(`[SALVANDO] ✅ Commit realizado no GitHub com sucesso.`);
+              logs.push(`[DEPLOY] 🚀 Vercel detectou a mudança. Aguardando build...`);
             } catch (err: any) {
-              processHistory.push(`❌ ERRO no passo ${step}: ${err.message}`);
+              logs.push(`[ERRO CRÍTICO] ❌ Falha no GitHub: ${err.message}`);
             }
           }
         }
       }
     }
 
-    const finalAiResponse = processHistory.length > 0 
-      ? processHistory.join("\n") 
-      : (data.content[0]?.text || "Processamento concluído.");
-
-    const segments = parseZarithEmotions(finalAiResponse);
+    const finalResponseText = logs.length > 0 ? logs.join("\n") : data.content[0].text;
+    const segments = parseZarithEmotions(finalResponseText);
 
     res.status(200).json({
-      text: finalAiResponse,
+      text: finalResponseText,
       segments: segments,
       shouldSpeak: true,
-      voiceConfig: { lang: 'pt-BR', rate: 1.1 }
+      voiceConfig: { lang: 'pt-BR', rate: 1.05 }
     });
 
   } catch (error: any) {
-    console.error("Zarith Error:", error);
-    res.status(500).json({ error: "Falha crítica nos circuitos de execução.", details: error.message });
+    res.status(500).json({ error: error.message });
   }
 });
 
