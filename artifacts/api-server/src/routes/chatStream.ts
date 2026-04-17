@@ -219,7 +219,7 @@ router.post("/stream", async (req, res) => {
       const key = process.env.GEMINI_API_KEY ?? "";
       if (!key) return false;
       const resp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:streamGenerateContent?key=${key}&alt=sse`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?key=${key}&alt=sse`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -233,25 +233,27 @@ router.post("/stream", async (req, res) => {
           }),
         }
       );
-      if (resp.status === 429 || !resp.body) return false;
+      if (resp.status === 429 || resp.status >= 400 || !resp.body) return false;
 
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
-      let buf = "";
+      let rawBuf = "";
       let fullText = "";
       let toolCallParams: any = null;
 
       while (true) {
         const { done: d, value } = await reader.read();
         if (d) break;
-        buf += decoder.decode(value, { stream: true });
-        let idx: number;
-        while ((idx = buf.indexOf("\n\n")) !== -1) {
-          const chunk = buf.slice(0, idx).replace(/^data: /, "").trim();
-          buf = buf.slice(idx + 2);
-          if (!chunk || chunk === "[DONE]") continue;
+        rawBuf += decoder.decode(value, { stream: true });
+        // Gemini SSE: lines starting with "data: " followed by \n\n
+        const lines = rawBuf.split("\n");
+        rawBuf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr || jsonStr === "[DONE]") continue;
           try {
-            const json = JSON.parse(chunk);
+            const json = JSON.parse(jsonStr);
             const parts = json?.candidates?.[0]?.content?.parts ?? [];
             for (const part of parts) {
               if (part.text) { fullText += part.text; onToken(part.text); }
@@ -514,7 +516,7 @@ router.post("/stream", async (req, res) => {
       const msgs = messages;
       if (m === "GEMINI") {
         const key = process.env.GEMINI_API_KEY ?? ""; if (!key) return null;
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${key}`, {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ contents: msgs.map((mm) => ({ role: mm.role === "assistant" ? "model" : "user", parts: [{ text: mm.content }] })), system_instruction: { parts: [{ text: systemPrompt }] }, tools: [{ function_declarations: TOOLS.map((t) => ({ name: t.name, description: t.description, parameters: t.input_schema })) }] }),
         });
