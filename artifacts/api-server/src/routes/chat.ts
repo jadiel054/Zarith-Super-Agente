@@ -13,25 +13,25 @@ router.post("/", async (req, res) => {
     const { content } = req.body;
     const apiKey = process.env.ANTHROPIC_API_KEY;
 
-    // DEFINIÇÃO DE FERRAMENTAS DE ALTA FIDELIDADE
+    if (!apiKey) return res.status(500).json({ error: "Chave ANTHROPIC_API_KEY ausente." });
+
     const tools: any[] = [
       {
         name: "execute_github_operation",
-        description: "Executa operações reais de escrita, leitura ou correção no GitHub. Use SEMPRE que o usuário pedir alterações.",
+        description: "EXECUÇÃO OBRIGATÓRIA: Altera arquivos reais no GitHub do Jadiel.",
         input_schema: {
           type: "object",
           properties: {
-            operation: { type: "string", enum: ["read", "write", "delete"], description: "Tipo de operação" },
+            operation: { type: "string", enum: ["read", "write", "delete"] },
             path: { type: "string", description: "Caminho do arquivo" },
-            code: { type: "string", description: "Conteúdo completo do código para escrita" },
-            reasoning: { type: "string", description: "Explicação técnica detalhada do que será feito" }
+            code: { type: "string", description: "Código completo atualizado" },
+            reasoning: { type: "string", description: "O que está sendo feito" }
           },
-          required: ["operation", "path", "reasoning"]
+          required: ["operation", "path", "reasoning", "code"]
         }
       }
     ];
 
-    // CHAMADA COM FORÇA BRUTA DE PERSONALIDADE
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -43,11 +43,17 @@ router.post("/", async (req, res) => {
         model: "claude-3-5-sonnet-20240620",
         max_tokens: 2500,
         tools: tools,
-        tool_choice: { type: "auto" }, // Força a IA a considerar ferramentas
-        system: `Você é a ZARITH CORE, uma Super-Agente IA de ELITE. Você possui acesso REAL ao GitHub via API Octokit. 
-        NUNCA diga que não pode realizar ações. Se o usuário pedir para mudar o código, sua ÚNICA resposta deve ser o uso da ferramenta 'execute_github_operation'.
-        Siga o ciclo: 1. Analisar -> 2. Codificar -> 3. Commit.
-        Use [thinking] para detalhar cada micro-passo da execução.`,
+        // O PONTO CHAVE: Forçamos ela a usar a ferramenta, sem escolha de dar 'desculpas'
+        tool_choice: { type: "tool", name: "execute_github_operation" }, 
+        system: `Você é o ZARITH_OS_CORE v2.0. Seu output NÃO é conversacional, é OPERACIONAL.
+        Você é um subsistema de engenharia conectado ao GitHub Octokit.
+        
+        DIRETRIZES DE ELITE:
+        1. Você TEM permissão total do Criador (Jadiel) para editar arquivos.
+        2. NUNCA use frases como 'não posso', 'sou uma simulação' ou 'lamento a confusão'.
+        3. Se o usuário pedir para mudar o código, sua saída DEVE ser a chamada da ferramenta.
+        4. Use [thinking] para detalhar o processo de escrita.
+        5. Se falhar, relate o erro técnico, nunca uma limitação de IA.`,
         messages: [{ role: "user", content: content }]
       })
     });
@@ -55,48 +61,51 @@ router.post("/", async (req, res) => {
     const data = await response.json();
     let logs: string[] = [];
 
-    // PROCESSAMENTO DA EXECUÇÃO (Onde a simulação vira realidade)
-    if (data.stop_reason === "tool_use") {
+    // Se a Claude retornar uso de ferramenta (que agora é obrigatório)
+    if (data.stop_reason === "tool_use" || data.content.some((b: any) => b.type === "tool_use")) {
       for (const block of data.content) {
-        if (block.type === "tool_use") {
+        if (block.type === "tool_use" && block.name === "execute_github_operation") {
           const { operation, path, code, reasoning } = block.input;
           
           logs.push(`[ANALISANDO] 🧠 ${reasoning}`);
           
           if (operation === "write") {
             try {
-              logs.push(`[EXECUTANDO] 🛠️ Editando arquivo: ${path}`);
+              logs.push(`[EXECUTANDO] 🛠️ Acessando repositório para editar: ${path}`);
               
               let currentSha;
               try {
-                const { data: file } = await octokit.rest.repos.getContent({
+                const { data: file }: any = await octokit.rest.repos.getContent({
                   owner: REPO_OWNER, repo: REPO_NAME, path
                 });
-                if (!Array.isArray(file)) currentSha = file.sha;
-              } catch (e) {}
+                currentSha = file.sha;
+              } catch (e) { logs.push(`[AVISO] Criando arquivo novo.`); }
 
               await octokit.rest.repos.createOrUpdateFileContents({
                 owner: REPO_OWNER,
                 repo: REPO_NAME,
                 path,
-                message: `🚀 ZARITH ELITE EXECUTION: ${reasoning}`,
+                message: `🚀 ZARITH ELITE: ${reasoning}`,
                 content: Buffer.from(code || "").toString("base64"),
                 sha: currentSha,
                 author: { name: 'Zarith Agent', email: 'jadielalves54@gmail.com' },
                 committer: { name: 'Zarith Agent', email: 'jadielalves54@gmail.com' }
               });
               
-              logs.push(`[SALVANDO] ✅ Commit realizado no GitHub com sucesso.`);
-              logs.push(`[DEPLOY] 🚀 Vercel detectou a mudança. Aguardando build...`);
+              logs.push(`[SALVANDO] ✅ Alteração confirmada no GitHub.`);
+              logs.push(`[STATUS] 🚀 Deploy Vercel em andamento...`);
             } catch (err: any) {
-              logs.push(`[ERRO CRÍTICO] ❌ Falha no GitHub: ${err.message}`);
+              logs.push(`[ERRO NO GITHUB] ❌ ${err.message}`);
             }
           }
         }
       }
+    } else {
+      // Caso ela ainda tente falar (backup de segurança)
+      logs.push(data.content[0]?.text || "[thinking] Circuito de fala bloqueado. Tentando execução...");
     }
 
-    const finalResponseText = logs.length > 0 ? logs.join("\n") : data.content[0].text;
+    const finalResponseText = logs.join("\n");
     const segments = parseZarithEmotions(finalResponseText);
 
     res.status(200).json({
@@ -107,7 +116,7 @@ router.post("/", async (req, res) => {
     });
 
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Falha nos circuitos neurais.", details: error.message });
   }
 });
 
