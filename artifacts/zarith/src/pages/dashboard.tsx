@@ -51,14 +51,14 @@ import { useShell } from "@/components/layout/shell";
 
 const API_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-// ELITE: Função para limpar markdown (asteriscos, etc) antes de falar
+// ELITE: Função para limpar markdown antes da voz falar
 const cleanTextForSpeech = (text: string) => {
   return text
-    .replace(/\*\*/g, "") // Remove negrito
-    .replace(/\*/g, "")   // Remove itálico/bullet
-    .replace(/#/g, "")    // Remove headers
-    .replace(/`/g, "")    // Remove code blocks
-    .replace(/\[.*\]\(.*\)/g, "") // Remove links markdown
+    .replace(/\*\*/g, "") 
+    .replace(/\*/g, "")   
+    .replace(/#/g, "")    
+    .replace(/`/g, "")    
+    .replace(/\[.*\]\(.*\)/g, "") 
     .trim();
 };
 
@@ -77,31 +77,58 @@ interface Block {
   isStreaming?: boolean;
 }
 
-// ... (Mantenha as interfaces BlockIcon e CopyButton iguais ao seu código original)
+interface LocalMessage {
+  id: string;
+  role: "user" | "assistant";
+  content?: string;
+  blocks?: Block[];
+  timestamp: Date;
+}
 
-// ─── Speaker Button ELITE ───────────────────────────────────────────────────
+function BlockIcon({ type }: { type: Block["type"] }) {
+  switch (type) {
+    case "thinking": return <Brain className="h-3 w-3 shrink-0 mt-0.5 text-white/30" />;
+    case "action":   return <Github className="h-3 w-3 shrink-0 mt-0.5 text-primary" />;
+    case "result":   return <CheckCircle2 className="h-3 w-3 shrink-0 mt-0.5 text-green-400" />;
+    case "error":    return <XCircle className="h-3 w-3 shrink-0 mt-0.5 text-red-400" />;
+    case "text":     return <Terminal className="h-3 w-3 shrink-0 mt-0.5 text-primary/60" />;
+    default:         return null;
+  }
+}
 
-function SpeakerButton({
-  text,
-  email,
-  onStart,
-  onEnd,
-}: {
-  text: string;
-  email: string | null;
-  onStart: () => void;
-  onEnd: () => void;
-}) {
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+      className="p-1 rounded text-white/20 hover:text-primary hover:bg-primary/10 transition-colors"
+    >
+      {copied ? <Check className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}
+    </button>
+  );
+}
+
+function fallbackSpeak(text: string, onEnd?: () => void) {
+  if (!window.speechSynthesis) { onEnd?.(); return; }
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text.slice(0, 500));
+  u.lang = "pt-BR";
+  u.onend = () => onEnd?.();
+  u.onerror = () => onEnd?.();
+  window.speechSynthesis.speak(u);
+}
+
+function SpeakerButton({ text, email, onStart, onEnd }: { text: string; email: string | null; onStart: () => void; onEnd: () => void; }) {
   const [loading, setLoading] = useState(false);
-
   const handleSpeak = async () => {
     if (loading) return;
     setLoading(true);
     onStart();
-
-    // Filtra o texto antes de enviar para a API ou fallback
     const cleanText = cleanTextForSpeech(text);
-
     try {
       if (email) {
         const r = await fetch(`${API_BASE}/api/voice/speak`, {
@@ -109,34 +136,114 @@ function SpeakerButton({
           headers: { "Content-Type": "application/json", "X-User-Email": email },
           body: JSON.stringify({ text: cleanText }),
         });
-        
         if (r.ok) {
           const blob = await r.blob();
           const url = URL.createObjectURL(blob);
           const audio = new Audio(url);
           audio.onended = () => { onEnd(); setLoading(false); URL.revokeObjectURL(url); };
-          audio.onerror = () => { onEnd(); setLoading(false); URL.revokeObjectURL(url); };
           audio.play();
           return;
         }
       }
-      // Fallback para voz do sistema se a API falhar ou não houver email
       fallbackSpeak(cleanText, () => { onEnd(); setLoading(false); });
     } catch {
       fallbackSpeak(cleanText, () => { onEnd(); setLoading(false); });
     }
   };
-
   return (
-    <button
-      onClick={handleSpeak}
-      disabled={loading}
-      className="p-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20"
-      title="Ouvir Resposta"
-    >
-      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Volume2 className="h-4 w-4" />}
+    <button onClick={handleSpeak} disabled={loading} className="p-1 rounded text-white/20 hover:text-primary transition-colors">
+      {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Volume2 className="h-3 w-3" />}
     </button>
   );
 }
 
-// ... (O restante das funções do Dashboard seguem aqui conforme seu arquivo original)
+function MessageBlock({ block, email, onSpeakStart, onSpeakEnd }: { block: Block; email: string | null; onSpeakStart: () => void; onSpeakEnd: () => void; }) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className={cn("rounded-sm border p-3 font-mono text-xs group relative", 
+      block.type === "thinking" && "bg-black/40 border-white/5 text-white/40",
+      block.type === "text" && "bg-black border-white/10 text-white/90"
+    )}>
+      <div className="flex items-start gap-2">
+        <BlockIcon type={block.type} />
+        <p className="flex-1 leading-relaxed whitespace-pre-wrap break-words">{block.content}</p>
+      </div>
+      {!block.isStreaming && (
+        <div className="flex items-center justify-end mt-2 gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <CopyButton text={block.content} />
+          {(block.type === "text" || block.type === "result") && (
+            <SpeakerButton text={block.content} email={email} onStart={onSpeakStart} onEnd={onSpeakEnd} />
+          )}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// COMPONENTE PRINCIPAL DASHBOARD
+function Dashboard() {
+  const { user } = useAuth();
+  const [messages, setMessages] = useState<LocalMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isAiActive, setIsAiActive] = useState(true);
+  const [selectedModel, setSelectedModel] = useState<ModelId | null>("GEMINI");
+
+  const onSendMessage = async (content: string) => {
+    if (!content.trim()) return;
+    const newMessage: LocalMessage = {
+      id: Math.random().toString(),
+      role: "user",
+      content,
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, newMessage]);
+    setInput("");
+    // Lógica de envio para API viria aqui...
+  };
+
+  return (
+    <div className="flex flex-col h-screen bg-black text-white p-4 overflow-hidden">
+      <div className="flex-1 overflow-hidden flex flex-col gap-4">
+        <div className="flex justify-center py-8">
+           <Orb status={isSpeaking ? "speaking" : "idle"} size="md" />
+        </div>
+        
+        <ScrollArea className="flex-1 px-4">
+          <div className="max-w-3xl mx-auto space-y-6">
+            {messages.map((m) => (
+              <div key={m.id} className={cn("flex flex-col gap-2", m.role === "user" ? "items-end" : "items-start")}>
+                {m.content && (
+                  <div className={cn("px-4 py-2 rounded-sm text-sm font-mono", m.role === "user" ? "bg-primary/20 border border-primary/30 text-primary" : "bg-white/5 border border-white/10")}>
+                    {m.content}
+                  </div>
+                )}
+                {m.blocks?.map((b, i) => (
+                  <MessageBlock key={i} block={b} email={user?.email || null} onSpeakStart={() => setIsSpeaking(true)} onSpeakEnd={() => setIsSpeaking(false)} />
+                ))}
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
+
+        <div className="max-w-3xl mx-auto w-full space-y-4">
+          <div className="flex gap-2">
+            <Input 
+              value={input} 
+              onChange={(e) => setInput(e.target.value)} 
+              onKeyDown={(e) => e.key === "Enter" && onSendMessage(input)}
+              placeholder="Comando para Zarith..." 
+              className="bg-black border-primary/20 text-primary font-mono"
+            />
+            <Button onClick={() => onSendMessage(input)} className="bg-primary hover:bg-primary/80">
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// A LINHA QUE FALTAVA PARA NÃO QUEBRAR O BUILD:
+export default Dashboard;
+        
