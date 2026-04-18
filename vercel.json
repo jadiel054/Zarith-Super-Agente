@@ -1,4 +1,7 @@
 {
+  "buildCommand": "pnpm run build",
+  "installCommand": "pnpm install --no-frozen-lockfile",
+  "outputDirectory": "artifacts/zarith/dist",
   "functions": {
     "api/[...path].mjs": {
       "maxDuration": 30
