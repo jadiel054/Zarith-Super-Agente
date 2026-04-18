@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
-// O caminho abaixo precisa existir no repositório para funcionar no runtime
-import router from "../artifacts/api-server/src/routes/index.mjs"; 
+// Ajustado para apontar para a pasta de build (dist)
+import router from "../artifacts/api-server/dist/index.mjs"; 
 
 const app = express();
 
@@ -19,7 +19,7 @@ app.use(express.json({ limit: "10mb" }));
 // Rota principal
 app.use("/api", router);
 
-// Middleware de Erro (JavaScript puro)
+// Middleware de Erro
 app.use((err, req, res, next) => {
   const statusCode = err.status || err.statusCode || 500;
   return res.status(statusCode).json({ 
