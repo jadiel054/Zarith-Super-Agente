@@ -8,14 +8,25 @@ app.use(express.json());
 
 export default async function handler(req, res) {
   try {
-    // Este caminho abaixo foi confirmado pelo seu log de build (pelo artifacts/api-server)
+    // Importa o servidor real compilado
     const module = await import("../artifacts/api-server/dist/index.mjs");
     const router = module.default || module.router || module;
 
-    app.use("/api", router);
-    return app(req, res);
+    // IMPORTANTE: O rewrite da Vercel já manda a req para cá.
+    // Usamos o router diretamente no nível raiz para evitar o erro de rota duplicada.
+    const internalApp = express();
+    internalApp.use(cors({ origin: true, credentials: true }));
+    internalApp.use(express.json());
+    
+    // Conecta o roteador do seu Zarith
+    internalApp.use("/", router);
+
+    return internalApp(req, res);
   } catch (e) {
-    console.error("ERRO:", e.message);
-    res.status(500).json({ error: e.message });
+    console.error("ERRO NA PONTE:", e.message);
+    res.status(500).json({ 
+      error: "Zarith API Bridge Error", 
+      details: e.message 
+    });
   }
 }
