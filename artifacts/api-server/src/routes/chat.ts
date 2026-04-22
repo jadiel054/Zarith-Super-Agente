@@ -444,56 +444,57 @@ ${repoContext}`;
             await processToolCall(model, secondResponse, followUpMsgs);
           }
         } else if (operation === "write") {
-        if (!path || !code) {
+          if (!path || !code) {
+            blocks.push({
+              type: "error",
+              content: "❌ Operação de escrita sem path ou code definidos.",
+              model,
+            });
+            return;
+          }
+
           blocks.push({
-            type: "error",
-            content: "❌ Operação de escrita sem path ou code definidos.",
+            type: "action",
+            content: `✏️ Commitando alterações em: ${path}`,
             model,
           });
-          return;
-        }
 
-        blocks.push({
-          type: "action",
-          content: `✏️ Commitando alterações em: ${path}`,
-          model,
-        });
-
-        try {
-          let currentSha: string | undefined;
           try {
-            const { data: file }: any = await octokit.rest.repos.getContent({
+            let currentSha: string | undefined;
+            try {
+              const { data: file }: any = await octokit.rest.repos.getContent({
+                owner: REPO_OWNER,
+                repo: REPO_NAME,
+                path,
+              });
+              currentSha = (file as any).sha;
+            } catch {}
+
+            await octokit.rest.repos.createOrUpdateFileContents({
               owner: REPO_OWNER,
               repo: REPO_NAME,
               path,
+              message: `🤖 Zarith Elite (${model}): ${reasoning ?? "Auto-update"}`,
+              content: Buffer.from(code).toString("base64"),
+              sha: currentSha,
+              author: {
+                name: "Zarith AI Agent",
+                email: "jadielalves54@gmail.com",
+              },
             });
-            currentSha = (file as any).sha;
-          } catch {}
 
-          await octokit.rest.repos.createOrUpdateFileContents({
-            owner: REPO_OWNER,
-            repo: REPO_NAME,
-            path,
-            message: `🤖 Zarith Elite (${model}): ${reasoning ?? "Auto-update"}`,
-            content: Buffer.from(code).toString("base64"),
-            sha: currentSha,
-            author: {
-              name: "Zarith AI Agent",
-              email: "jadielalves54@gmail.com",
-            },
-          });
-
-          blocks.push({
-            type: "result",
-            content: `✅ [GITHUB] Commit realizado com sucesso em \`${path}\``,
-            model,
-          });
-        } catch (err: any) {
-          blocks.push({
-            type: "error",
-            content: `❌ [GITHUB] Falha no commit: ${err.message}`,
-            model,
-          });
+            blocks.push({
+              type: "result",
+              content: `✅ [GITHUB] Commit realizado com sucesso em \`${path}\``,
+              model,
+            });
+          } catch (err: any) {
+            blocks.push({
+              type: "error",
+              content: `❌ [GITHUB] Falha no commit: ${err.message}`,
+              model,
+            });
+          }
         }
       }
     };
