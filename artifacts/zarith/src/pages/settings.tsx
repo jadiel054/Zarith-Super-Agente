@@ -47,8 +47,9 @@ const PROVIDERS: ProviderGroup[] = [
     category: "LANGUAGE MODELS — GEMINI É O CORE PRINCIPAL",
     fields: [
       { fieldKey: "geminiApiKey", label: "Google Gemini 2.5 Flash — CORE PRINCIPAL", placeholder: "AIza..." },
-      { fieldKey: "anthropicApiKey", label: "Anthropic — Claude 3.5 (Fallback #1)", placeholder: "sk-ant-..." },
-      { fieldKey: "openaiApiKey", label: "OpenAI — GPT-4o (Fallback #2)", placeholder: "sk-..." },
+      { fieldKey: "groqApiKey", label: "Groq — Llama 3.3 (Fallback #1)", placeholder: "gsk_..." },
+      { fieldKey: "anthropicApiKey", label: "Anthropic — Claude 3.5 (Fallback #2)", placeholder: "sk-ant-..." },
+      { fieldKey: "openaiApiKey", label: "OpenAI — GPT-4o (Fallback #3)", placeholder: "sk-..." },
     ],
   },
   {

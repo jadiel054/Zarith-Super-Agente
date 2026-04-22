@@ -16,8 +16,8 @@ const sandbox = new Sandbox();
 const evolutionEngine = new EvolutionEngine();
 const gitTools = new GitTools();
 
-// Groq removido — Gemini é o CORE PRINCIPAL
-type ModelId = "GEMINI" | "CLAUDE" | "OPENAI";
+// Groq reintegrado como prioridade de fallback
+type ModelId = "GEMINI" | "GROQ" | "CLAUDE" | "OPENAI";
 
 export interface ResponseBlock {
   type: "thinking" | "action" | "result" | "text" | "error";
@@ -83,7 +83,7 @@ function extractToolCall(model: ModelId, response: any): { name: string; params:
     const call = response.candidates?.[0]?.content?.parts?.find((p: any) => p.functionCall);
     return call ? { name: call.functionCall.name, params: call.functionCall.args } : null;
   }
-  if (model === "OPENAI") {
+  if (model === "OPENAI" || model === "GROQ") {
     const call = response.choices?.[0]?.message?.tool_calls?.[0]?.function;
     if (call) {
       try {
@@ -105,7 +105,7 @@ function extractText(model: ModelId, response: any): string | null {
     return (
       response.candidates?.[0]?.content?.parts?.find((p: any) => p.text)?.text ?? null
     );
-  if (model === "OPENAI")
+  if (model === "OPENAI" || model === "GROQ")
     return response.choices?.[0]?.message?.content ?? null;
   return null;
 }
@@ -217,6 +217,33 @@ ${repoContext}`;
     const callAi = async (model: ModelId, messages?: any[]): Promise<any> => {
       const msgs = messages ?? [{ role: "user", content }];
 
+      if (model === "GROQ") {
+        const key = process.env.GROQ_API_KEY || req.headers["x-groq-key"] as string || "";
+        if (!key) return null;
+        const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${key}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "llama-3.3-70b-versatile",
+            messages: [{ role: "system", content: systemPrompt }, ...msgs],
+            tools: tools.map((t) => ({
+              type: "function",
+              function: {
+                name: t.name,
+                description: t.description,
+                parameters: t.input_schema,
+              },
+            })),
+            tool_choice: "auto",
+          }),
+        });
+        if (resp.status === 429 || resp.status === 503) return { _rateLimit: true };
+        return resp.json();
+      }
+
       if (model === "GEMINI") {
         const key = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || "";
         if (!key) return null;
@@ -299,27 +326,36 @@ ${repoContext}`;
       return null;
     };
 
-    // --- LOGICA DE SELEÇÃO: PRIORIDADE MÁXIMA AO GEMINI ---
+    // --- LOGICA DE SELEÇÃO: SILENT RETRY & FALLBACK PRIORITÁRIO ---
     let finalModel: ModelId | null = null;
     let aiResponse: any = null;
 
     // Se você selecionou um modelo, tentamos ele. Se não, forçamos GEMINI.
     const targetModel: ModelId = (selectedModel as ModelId) || "GEMINI";
     
+    // Tentativa inicial
     aiResponse = await callAi(targetModel);
     
     if (aiResponse && !isRateLimited(aiResponse) && !aiResponse.error) {
       finalModel = targetModel;
     } else {
-      // Fallback agressivo se o principal falhar
-      const priority: ModelId[] = ["GEMINI", "CLAUDE", "OPENAI"];
+      // SILENT RETRY: Fallback automático com Groq como prioridade 1
+      const priority: ModelId[] = ["GROQ", "GEMINI", "CLAUDE", "OPENAI"];
+      
       for (const m of priority) {
         if (m === targetModel) continue;
+        
+        // Log silencioso no painel (thinking block)
+        blocks.push({ 
+          type: "thinking", 
+          content: `⚠️ [${targetModel}] instável (503/429). Tentando Silent Retry via ${m}...`, 
+          model: m 
+        });
+
         const resp = await callAi(m);
         if (resp && !isRateLimited(resp) && !resp.error) {
           aiResponse = resp;
           finalModel = m;
-          blocks.push({ type: "thinking", content: `🔄 Fallback para ${m}...`, model: m });
           break;
         }
       }

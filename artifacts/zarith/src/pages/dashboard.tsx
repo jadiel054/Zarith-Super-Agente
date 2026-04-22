@@ -65,6 +65,7 @@ export default function Dashboard() {
           "X-User-Email": user?.email || "",
           // Injeta as chaves do painel diretamente no cabeçalho
           "X-Gemini-Key": keys.gemini || keys.geminiKey || "",
+          "X-Groq-Key": keys.groq || keys.groqApiKey || "",
           "X-OpenAI-Key": keys.openai || keys.openaiKey || "",
           "X-Claude-Key": keys.claude || keys.claudeKey || ""
         },
