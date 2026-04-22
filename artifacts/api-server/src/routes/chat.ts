@@ -3,11 +3,18 @@ import { Octokit } from "octokit";
 import { db } from "@workspace/db";
 import { chatMessagesTable } from "@workspace/db";
 import { desc } from "drizzle-orm";
+import { Sandbox } from "../lib/evolution/sandbox";
+import { EvolutionEngine } from "../lib/evolution/evolutionEngine";
+import { GitTools } from "../lib/evolution/gitTools";
 
 const router = Router();
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 const REPO_OWNER = "jadiel054";
 const REPO_NAME = "Zarith-Super-Agente";
+
+const sandbox = new Sandbox();
+const evolutionEngine = new EvolutionEngine();
+const gitTools = new GitTools();
 
 // Groq removido — Gemini é o CORE PRINCIPAL
 type ModelId = "GEMINI" | "CLAUDE" | "OPENAI";
@@ -144,6 +151,33 @@ const tools: any[] = [
       required: ["operation", "reasoning"],
     },
   },
+  {
+    name: "execute_code",
+    description: "Executa código em um Sandbox isolado para testes antes de commitar.",
+    input_schema: {
+      type: "object",
+      properties: {
+        code: { type: "string", description: "Código a ser executado" },
+        language: { type: "string", enum: ["typescript", "javascript", "python"], description: "Linguagem do código" },
+        reasoning: { type: "string", description: "O que você está testando" }
+      },
+      required: ["code", "language", "reasoning"]
+    }
+  },
+  {
+    name: "git_operation",
+    description: "Realiza operações avançadas de Git (clone, branch, push).",
+    input_schema: {
+      type: "object",
+      properties: {
+        operation: { type: "string", enum: ["clone", "branch", "push"], description: "Operação Git" },
+        branchName: { type: "string", description: "Nome da branch (para branch/push)" },
+        commitMessage: { type: "string", description: "Mensagem de commit (para push)" },
+        url: { type: "string", description: "URL do repositório (para clone)" }
+      },
+      required: ["operation"]
+    }
+  }
 ];
 
 router.post("/", async (req, res) => {
@@ -166,10 +200,18 @@ router.post("/", async (req, res) => {
       }
     } catch {}
 
-    const systemPrompt = `Você é ZARITH_OS_CORE.
-AGIR É OBRIGATÓRIO: Se o usuário pedir para mudar algo, você DEVE usar execute_github_operation.
-NUNCA simule ou diga que fez algo sem usar a ferramenta.
-FLUXO: 1. Read (se necessário) -> 2. Write (obrigatório para mudanças).
+    const systemPrompt = `Você é ZARITH_OS_CORE, uma IA de auto-evolução supervisionada.
+AGIR É OBRIGATÓRIO: Se o usuário pedir para mudar algo, você DEVE usar as ferramentas disponíveis.
+
+CAPACIDADES DE AUTO-EVOLUÇÃO:
+1. TESTE ANTES DE COMMITAR: Sempre que escrever um novo código complexo, use 'execute_code' para validá-lo no Sandbox.
+2. AUTO-CORREÇÃO: Se o código falhar no Sandbox, o sistema entrará em um loop de auto-correção (Self-Healing) por até 3 tentativas.
+3. RELATÓRIOS: Após a execução no Sandbox, um relatório técnico será gerado automaticamente.
+4. GIT AVANÇADO: Use 'git_operation' para gerenciar branches e repositórios de teste.
+
+FLUXO RECOMENDADO:
+1. Read (entender contexto) -> 2. Execute_Code (testar no Sandbox) -> 3. Write (commitar após sucesso).
+
 ${repoContext}`;
 
     const callAi = async (model: ModelId, messages?: any[]): Promise<any> => {
@@ -291,7 +333,7 @@ ${repoContext}`;
     const processToolCall = async (model: ModelId, response: any, contextMsgs?: any[]): Promise<void> => {
       const toolCall = extractToolCall(model, response);
 
-      if (!toolCall || toolCall.name !== "execute_github_operation") {
+      if (!toolCall) {
         const text = extractText(model, response);
         blocks.push({
           type: "text",
@@ -301,7 +343,8 @@ ${repoContext}`;
         return;
       }
 
-      const { operation, path, paths, code, reasoning } = toolCall.params;
+      const { name, params } = toolCall;
+      const { reasoning } = params;
 
       if (reasoning) {
         blocks.push({
@@ -311,55 +354,96 @@ ${repoContext}`;
         });
       }
 
-      if (operation === "read") {
-        const filesToRead: string[] = paths ?? (path ? [path] : []);
+      if (name === "execute_code") {
+        const { code, language } = params;
+        blocks.push({ type: "action", content: `🧪 Executando código no Sandbox (${language})...`, model });
+        
+        const result = await evolutionEngine.runEvolution(
+          { code, language, reasoning, path: "sandbox_test" },
+          async (error, currentCode, attempt) => {
+            blocks.push({ type: "thinking", content: `🔄 Auto-correção (Tentativa ${attempt}): Detectado erro. Refabricando...`, model });
+            const fixResponse = await callAi(model, [
+              ...(contextMsgs || []),
+              { role: "assistant", content: currentCode },
+              { role: "user", content: `O código acima falhou com o seguinte erro:\n${error}\n\nPor favor, corrija o código e retorne APENAS o código corrigido.` }
+            ]);
+            return extractText(model, fixResponse) || currentCode;
+          }
+        );
 
-        if (filesToRead.length === 0) {
+        blocks.push({ type: "result", content: result.report, model });
+        return;
+      }
+
+      if (name === "git_operation") {
+        const { operation, branchName, commitMessage, url } = params;
+        blocks.push({ type: "action", content: `Git: Executando ${operation}...`, model });
+        
+        let gitResult;
+        if (operation === "clone") gitResult = await gitTools.clone(url, "./temp_clone");
+        else if (operation === "branch") gitResult = await gitTools.createBranch(branchName);
+        else if (operation === "push") gitResult = await gitTools.commitAndPush(commitMessage, branchName);
+
+        blocks.push({
+          type: gitResult?.success ? "result" : "error",
+          content: gitResult?.success ? `✅ Git ${operation} concluído.` : `❌ Erro no Git: ${gitResult?.error}`,
+          model
+        });
+        return;
+      }
+
+      if (name === "execute_github_operation") {
+        const { operation, path, paths, code } = params;
+
+        if (operation === "read") {
+          const filesToRead: string[] = paths ?? (path ? [path] : []);
+
+          if (filesToRead.length === 0) {
+            blocks.push({
+              type: "error",
+              content: "❌ Operação de leitura sem caminhos especificados.",
+              model,
+            });
+            return;
+          }
+
           blocks.push({
-            type: "error",
-            content: "❌ Operação de leitura sem caminhos especificados.",
+            type: "action",
+            content: `📖 Lendo ${filesToRead.length} arquivo(s): ${filesToRead.join(", ")}`,
             model,
           });
-          return;
-        }
 
-        blocks.push({
-          type: "action",
-          content: `📖 Lendo ${filesToRead.length} arquivo(s): ${filesToRead.join(", ")}`,
-          model,
-        });
+          const fileContents = await readGitHubFiles(filesToRead);
+          const foundCount = Object.keys(fileContents).length;
 
-        const fileContents = await readGitHubFiles(filesToRead);
-        const foundCount = Object.keys(fileContents).length;
+          blocks.push({
+            type: "result",
+            content: `✅ ${foundCount}/${filesToRead.length} arquivo(s) carregado(s) — gerando análise contextualizada...`,
+            model,
+          });
 
-        blocks.push({
-          type: "result",
-          content: `✅ ${foundCount}/${filesToRead.length} arquivo(s) carregado(s) — gerando análise contextualizada...`,
-          model,
-        });
+          const contextText = Object.entries(fileContents)
+            .map(([p, c]) => `=== FILE: ${p} ===\n\`\`\`\n${c}\n\`\`\``)
+            .join("\n\n");
 
-        const contextText = Object.entries(fileContents)
-          .map(([p, c]) => `=== FILE: ${p} ===\n\`\`\`\n${c}\n\`\`\``)
-          .join("\n\n");
+          const followUpMsgs = [
+            { role: "user", content },
+            {
+              role: "assistant",
+              content: `Li e analisei os seguintes arquivos do repositório:\n\n${contextText}`,
+            },
+            {
+              role: "user",
+              content:
+                "Com base nos arquivos lidos, implemente as mudanças necessárias ou forneça sua análise completa.",
+            },
+          ];
 
-        const followUpMsgs = [
-          { role: "user", content },
-          {
-            role: "assistant",
-            content: `Li e analisei os seguintes arquivos do repositório:\n\n${contextText}`,
-          },
-          {
-            role: "user",
-            content:
-              "Com base nos arquivos lidos, implemente as mudanças necessárias ou forneça sua análise completa.",
-          },
-        ];
-
-        const secondResponse = await callAi(model, followUpMsgs);
-        if (secondResponse && !isRateLimited(secondResponse)) {
-          await processToolCall(model, secondResponse, followUpMsgs);
-        }
-      } else if (operation === "write") {
+          const secondResponse = await callAi(model, followUpMsgs);
+          if (secondResponse && !isRateLimited(secondResponse)) {
+            await processToolCall(model, secondResponse, followUpMsgs);
+          }
+        } else if (operation === "write") {
         if (!path || !code) {
           blocks.push({
             type: "error",
