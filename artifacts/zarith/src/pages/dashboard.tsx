@@ -57,50 +57,52 @@ export default function Dashboard() {
     try {
       const keys = getStoredKeys();
       
-      // MELHORIA 2: Rota dinâmica baseada no Deploy atual
-      const res = await fetch(`${window.location.origin}/api/chat`, {
+      const res = await fetch(`${window.location.origin}/api/chat/stream`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
           "X-User-Email": user?.email || "",
-          // Injeta as chaves do painel diretamente no cabeçalho
-          "X-Gemini-Key": keys.gemini || keys.geminiKey || "",
-          "X-Groq-Key": keys.groq || keys.groqApiKey || "",
-          "X-OpenAI-Key": keys.openai || keys.openaiKey || "",
-          "X-Claude-Key": keys.claude || keys.claudeKey || ""
         },
         body: JSON.stringify({ 
-          message: val, 
-          model: keys.selectedModel || "GEMINI", 
-          context: messages.slice(-3) 
+          content: val, 
+          selectedModel: keys.selectedModel || "GEMINI", 
         })
       });
 
-      // MELHORIA 3: Tratamento de Erro 500 (O erro do seu log)
-      if (!res.ok) {
-        const errorData = await res.text();
-        throw new Error(`Servidor offline ou erro 500: ${errorData.slice(0, 30)}`);
+      if (!res.ok || !res.body) {
+        throw new Error(`Erro na conexão com o servidor.`);
       }
 
-      const data = await res.json();
-      
-      // MELHORIA 4: Varredura profunda por conteúdo (evita o "Sem Resposta")
-      const aiBlocks = data.blocks || 
-                       (data.text ? [{ type: "text", content: data.text }] : 
-                       data.response ? [{ type: "text", content: data.response }] : 
-                       null);
-
-      const aiMsg: LocalMessage = {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let aiMsg: LocalMessage = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        blocks: aiBlocks || [{ 
-          type: "error", 
-          content: "Zarith recebeu o pacote, mas o cérebro retornou vazio. Verifique se as APIs no painel estão salvas corretamente." 
-        }],
+        blocks: [],
         timestamp: new Date()
       };
 
       setMessages(p => [...p, aiMsg]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value);
+        const lines = chunk.split("\n");
+        
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.type === "block") {
+                aiMsg.blocks = [...(aiMsg.blocks || []), data.content];
+                setMessages(p => p.map(m => m.id === aiMsg.id ? { ...aiMsg } : m));
+              }
+            } catch (e) {}
+          }
+        }
+      }
 
     } catch (e: any) {
       setMessages(p => [...p, { 
@@ -112,6 +114,18 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAuthorization = async (action: string, params: any, authorized: boolean) => {
+    // Lógica para enviar a resposta de autorização para o servidor
+    try {
+      await fetch(`${window.location.origin}/api/chat/authorize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, params, authorized })
+      });
+      // Opcionalmente, atualizar a UI para refletir a decisão
+    } catch (e) {}
   };
 
   return (
@@ -152,29 +166,37 @@ export default function Dashboard() {
                     <span className="opacity-40 mr-2 font-bold">{">"}</span>{m.content}
                   </div>
                 )}
-                {m.blocks?.map((b, i) => (
-                  <motion.div 
-                    key={i} 
-                    initial={{ opacity: 0, x: -10 }} 
-                    animate={{ opacity: 1, x: 0 }}
-                    className={cn(
-                      "p-4 mb-3 border rounded-sm w-full",
-                      b.type === "thinking" ? "bg-zinc-900/30 border-white/5 text-white/30 italic" : 
-                      b.type === "error" ? "bg-red-950/20 border-red-500/50 text-red-400" :
-                      "bg-zinc-900/60 border-white/10 text-white/90 shadow-2xl"
-                    )}
-                  >
-                    <div className="flex gap-3">
-                      {b.type === "thinking" ? <Brain className="h-4 w-4 shrink-0 opacity-20" /> : 
-                       b.type === "error" ? <AlertCircle className="h-4 w-4 shrink-0" /> :
-                       <Terminal className="h-4 w-4 shrink-0 text-primary/70" />}
-                      <div className="flex-1 space-y-2">
-                        {b.model && <span className="text-[9px] bg-primary/10 text-primary px-2 py-0.5 rounded-full uppercase tracking-tighter">{b.model}</span>}
-                        <p className="text-xs leading-relaxed">{b.content}</p>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
+	                {m.blocks?.map((b, i) => (
+	                  <motion.div 
+	                    key={i} 
+	                    initial={{ opacity: 0, x: -10 }} 
+	                    animate={{ opacity: 1, x: 0 }}
+	                    className={cn(
+	                      "p-4 mb-3 border rounded-sm w-full",
+	                      b.type === "thinking" ? "bg-zinc-900/30 border-white/5 text-white/30 italic" : 
+	                      b.type === "error" ? "bg-red-950/20 border-red-500/50 text-red-400" :
+                        b.type === "ask" ? "bg-yellow-950/20 border-yellow-500/50 text-yellow-400" :
+	                      "bg-zinc-900/60 border-white/10 text-white/90 shadow-2xl"
+	                    )}
+	                  >
+	                    <div className="flex gap-3">
+	                      {b.type === "thinking" ? <Brain className="h-4 w-4 shrink-0 opacity-20" /> : 
+	                       b.type === "error" ? <AlertCircle className="h-4 w-4 shrink-0" /> :
+                         b.type === "ask" ? <ShieldCheck className="h-4 w-4 shrink-0" /> :
+	                       <Terminal className="h-4 w-4 shrink-0 text-primary/70" />}
+	                      <div className="flex-1 space-y-2">
+	                        {b.model && <span className="text-[9px] bg-primary/10 text-primary px-2 py-0.5 rounded-full uppercase tracking-tighter">{b.model}</span>}
+	                        <p className="text-xs leading-relaxed">{b.content}</p>
+                          {b.type === "ask" && (
+                            <div className="flex gap-2 mt-4">
+                              <Button size="sm" className="bg-yellow-500 text-black hover:bg-yellow-400" onClick={() => handleAuthorization("action", {}, true)}>Autorizar</Button>
+                              <Button size="sm" variant="outline" className="border-yellow-500 text-yellow-500 hover:bg-yellow-500/10" onClick={() => handleAuthorization("action", {}, false)}>Negar</Button>
+                            </div>
+                          )}
+	                      </div>
+	                    </div>
+	                  </motion.div>
+	                ))}
               </div>
             ))}
           </div>
