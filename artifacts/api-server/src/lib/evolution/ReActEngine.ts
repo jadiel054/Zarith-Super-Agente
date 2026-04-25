@@ -1,5 +1,5 @@
 import { db } from "@workspace/db";
-import { zarithExecutionLogsTable, zarithMemoryTable, zarithAuthorizationsTable } from "@workspace/db/src/schema";
+import { zarithExecutionLogsTable, zarithMemoryTable, zarithAuthorizationsTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { OpenAI } from "openai"; // Usaremos OpenAI para embeddings e possivelmente para o LLM principal
 
