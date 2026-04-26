@@ -108,7 +108,7 @@ ${repoTree ? `\nÁRVORE DO REPOSITÓRIO ZARITH:\n${repoTree}` : ""}`;
 
 // ─── Main Stream Route ────────────────────────────────────────────────────────
 
-router.post("/stream", async (req, res) => {
+router.post("/chat/stream", async (req, res) => {
   const { content, selectedModel, isAiActive = true } = req.body;
 
   res.setHeader("Content-Type", "text/event-stream");

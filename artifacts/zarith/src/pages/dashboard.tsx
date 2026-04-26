@@ -136,9 +136,27 @@ export default function Dashboard() {
           <div className={cn("h-2 w-2 rounded-full", loading ? "bg-yellow-500 animate-pulse" : "bg-primary")} />
           <span className="text-[10px] tracking-[0.2em] text-primary/60 uppercase">Zarith Core v2.5</span>
         </div>
-        <div className="flex gap-4 opacity-40">
-           <ShieldCheck className="h-4 w-4" />
-           <Settings2 className="h-4 w-4 cursor-pointer hover:text-primary transition-colors" />
+        <div className="flex items-center gap-6">
+          <div className="hidden md:flex items-center gap-4 px-4 py-1.5 bg-primary/5 border border-primary/10 rounded-full">
+            <div className="flex flex-col items-end">
+              <span className="text-[8px] text-primary/40 leading-none uppercase">Device ID</span>
+              <span className="text-[10px] text-primary font-bold leading-none">Z-8842-X</span>
+            </div>
+            <div className="h-4 w-[1px] bg-primary/20" />
+            <div className="flex flex-col items-end">
+              <span className="text-[8px] text-primary/40 leading-none uppercase">IMEI Status</span>
+              <span className="text-[10px] text-primary font-bold leading-none">SECURE</span>
+            </div>
+            <div className="h-4 w-[1px] bg-primary/20" />
+            <div className="flex flex-col items-end">
+              <span className="text-[8px] text-primary/40 leading-none uppercase">Location</span>
+              <span className="text-[10px] text-primary font-bold leading-none">ENCRYPTED</span>
+            </div>
+          </div>
+          <div className="flex gap-4 opacity-40">
+             <ShieldCheck className="h-4 w-4" />
+             <Settings2 className="h-4 w-4 cursor-pointer hover:text-primary transition-colors" />
+          </div>
         </div>
       </div>
 

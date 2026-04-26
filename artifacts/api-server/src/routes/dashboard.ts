@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { tasksTable, chatMessagesTable, activityLogTable } from "@workspace/db";
+import { tasksTable, chatMessagesTable, activityLogTable, zarithExecutionLogsTable } from "@workspace/db";
 import { eq, count, desc } from "drizzle-orm";
 import { GetRecentActivityQueryParams } from "@workspace/api-zod";
 
@@ -50,13 +50,30 @@ router.get("/activity", async (req, res) => {
     .orderBy(desc(activityLogTable.createdAt))
     .limit(limit);
 
-  res.json(activities.map(a => ({
-    id: a.id,
-    type: a.type,
-    description: a.description,
-    metadata: a.metadata ?? null,
-    createdAt: a.createdAt.toISOString(),
-  })));
+  const executionLogs = await db
+    .select()
+    .from(zarithExecutionLogsTable)
+    .orderBy(desc(zarithExecutionLogsTable.createdAt))
+    .limit(limit);
+
+  const combined = [
+    ...activities.map(a => ({
+      id: a.id,
+      type: a.type,
+      description: a.description,
+      metadata: a.metadata ?? null,
+      createdAt: a.createdAt.toISOString(),
+    })),
+    ...executionLogs.map(l => ({
+      id: l.id,
+      type: "agent_thought",
+      description: l.thought,
+      metadata: { action: l.action, observation: l.observation },
+      createdAt: l.createdAt.toISOString(),
+    }))
+  ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, limit);
+
+  res.json(combined);
 });
 
 export default router;

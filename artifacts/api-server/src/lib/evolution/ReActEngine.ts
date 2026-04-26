@@ -109,6 +109,13 @@ export class ReActEngine {
       };
     }
 
+    // Salvar o pensamento no log de execução
+    await this.logExecution({
+      thought,
+      action: action ? action.name : null,
+      status: "thinking"
+    });
+
     return { thought, action };
   }
 

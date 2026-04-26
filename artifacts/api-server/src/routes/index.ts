@@ -14,7 +14,7 @@ router.use(healthRouter);
 router.use("/auth", authRouter);
 router.use("/tasks", tasksRouter);
 router.use("/chat", chatRouter);
-router.use("/chat", chatStreamRouter);
+router.use(chatStreamRouter);
 router.use("/dashboard", dashboardRouter);
 router.use("/settings", settingsRouter);
 router.use("/voice", voiceRouter);
