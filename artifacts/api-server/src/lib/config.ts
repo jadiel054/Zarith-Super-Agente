@@ -1,8 +1,3 @@
-import dotenv from 'dotenv';
-import path from 'path';
-
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
-
 interface ZarithConfig {
   PORT: number;
   NODE_ENV: string;
