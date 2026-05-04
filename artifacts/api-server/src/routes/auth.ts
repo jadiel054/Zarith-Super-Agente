@@ -166,7 +166,8 @@ router.post("/verify-otp", async (req, res) => {
   localOtpStore.delete(email); // Invalidate OTP after successful use
 
   // Return a simple non-JWT session token — the frontend trusts non-JWT tokens indefinitely
-  const sessionToken = `zarith_local_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  // Alterado para um token de sessão local que não expira para maior permanência
+  const sessionToken = `zarith_local_${Math.random().toString(36).slice(2)}`;
 
   res.json({
     success: true,
