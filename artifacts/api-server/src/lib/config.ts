@@ -1,3 +1,4 @@
+
 // Groq removido — Gemini é o CORE PRINCIPAL da Zarith
 interface ZarithConfig {
   geminiApiKey: string | null;
@@ -5,6 +6,8 @@ interface ZarithConfig {
   anthropicApiKey: string | null;
   githubToken: string | null;
   vercelToken: string | null;
+  supabaseUrl: string | null; // Adicionado Supabase URL
+  supabaseKey: string | null; // Adicionado Supabase Key
 }
 
 const _config: ZarithConfig = {
@@ -13,6 +16,8 @@ const _config: ZarithConfig = {
   anthropicApiKey: process.env["ANTHROPIC_API_KEY"] ?? null,
   githubToken: process.env["GITHUB_TOKEN"] ?? null,
   vercelToken: process.env["VERCEL_TOKEN"] ?? null,
+  supabaseUrl: process.env["SUPABASE_URL"] ?? null, // Carrega do ambiente
+  supabaseKey: process.env["SUPABASE_KEY"] ?? null, // Carrega do ambiente
 };
 
 export function getConfig(): Readonly<ZarithConfig> {
@@ -25,6 +30,8 @@ export function updateConfig(updates: Partial<ZarithConfig>): void {
   if (updates.anthropicApiKey !== undefined) _config.anthropicApiKey = updates.anthropicApiKey;
   if (updates.githubToken !== undefined) _config.githubToken = updates.githubToken;
   if (updates.vercelToken !== undefined) _config.vercelToken = updates.vercelToken;
+  if (updates.supabaseUrl !== undefined) _config.supabaseUrl = updates.supabaseUrl; // Atualiza Supabase URL
+  if (updates.supabaseKey !== undefined) _config.supabaseKey = updates.supabaseKey; // Atualiza Supabase Key
 }
 
 export function maskKey(key: string | null): string | null {
