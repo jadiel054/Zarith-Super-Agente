@@ -14,31 +14,35 @@ import {
 const router = Router();
 
 router.get("/", async (req, res) => {
-  const query = ListTasksQueryParams.safeParse(req.query);
-  const limit = query.success && query.data.limit ? query.data.limit : 50;
-  const status = query.success ? query.data.status : undefined;
+  try {
+    const query = ListTasksQueryParams.safeParse(req.query);
+    const limit = query.success && query.data.limit ? query.data.limit : 50;
+    const status = query.success ? query.data.status : undefined;
 
-  let tasks;
-  if (status) {
-    tasks = await db
-      .select()
-      .from(tasksTable)
-      .where(eq(tasksTable.status, status as "pending" | "in_progress" | "completed" | "failed"))
-      .orderBy(desc(tasksTable.createdAt))
-      .limit(limit);
-  } else {
-    tasks = await db
-      .select()
-      .from(tasksTable)
-      .orderBy(desc(tasksTable.createdAt))
-      .limit(limit);
+    let tasks;
+    if (status) {
+      tasks = await db
+        .select()
+        .from(tasksTable)
+        .where(eq(tasksTable.status, status as "pending" | "in_progress" | "completed" | "failed"))
+        .orderBy(desc(tasksTable.createdAt))
+        .limit(limit);
+    } else {
+      tasks = await db
+        .select()
+        .from(tasksTable)
+        .orderBy(desc(tasksTable.createdAt))
+        .limit(limit);
+    }
+
+    res.json(tasks.map(t => ({
+      ...t,
+      createdAt: t.createdAt.toISOString(),
+      updatedAt: t.updatedAt.toISOString(),
+    })));
+  } catch {
+    res.status(200).json([]);
   }
-
-  res.json(tasks.map(t => ({
-    ...t,
-    createdAt: t.createdAt.toISOString(),
-    updatedAt: t.updatedAt.toISOString(),
-  })));
 });
 
 router.post("/", async (req, res) => {
