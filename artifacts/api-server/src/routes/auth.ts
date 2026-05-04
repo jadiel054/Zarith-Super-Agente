@@ -6,10 +6,14 @@ const router = Router();
 
 // ─── Local OTP store (used when Supabase is not configured) ─────────────────
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_OTP_ATTEMPTS = 5; // Max attempts before locking an email
+const LOCKOUT_DURATION_MS = 5 * 60 * 1000; // 5 minutes lockout
 
 interface OtpEntry {
   code: string;
   expiresAt: number;
+  attempts: number;
+  lockedUntil: number;
 }
 
 const localOtpStore = new Map<string, OtpEntry>();
@@ -59,9 +63,19 @@ router.post("/send-otp", async (req, res) => {
 
   // ── Local mode ──────────────────────────────────────────────────────────
   const code = generateOtp();
-  localOtpStore.set(email, { code, expiresAt: Date.now() + OTP_TTL_MS });
+  localOtpStore.set(email, {
+    code,
+    expiresAt: Date.now() + OTP_TTL_MS,
+    attempts: 0, // Reset attempts on new OTP request
+    lockedUntil: 0, // Reset lock on new OTP request
+  });
 
-  logger.info(`\n${"═".repeat(50)}\n  ZARITH LOCAL AUTH — OTP for ${email}\n  CODE: ${code}\n${"═".repeat(50)}\n`);
+  logger.info(`
+${"═".repeat(50)}
+  ZARITH LOCAL AUTH — OTP for ${email}
+  CODE: ${code}
+${"═".repeat(50)}
+`);
 
   res.json({
     success: true,
@@ -110,24 +124,46 @@ router.post("/verify-otp", async (req, res) => {
 
   // ── Local mode ──────────────────────────────────────────────────────────
   const entry = localOtpStore.get(email);
+  const now = Date.now();
 
   if (!entry) {
     res.status(401).json({ success: false, message: "No OTP found for this address. Request a new one." });
     return;
   }
 
-  if (Date.now() > entry.expiresAt) {
+  if (entry.lockedUntil > now) {
+    const remainingSeconds = Math.ceil((entry.lockedUntil - now) / 1000);
+    res.status(429).json({
+      success: false,
+      message: `Too many failed attempts. Please try again in ${remainingSeconds} seconds.`,
+    });
+    return;
+  }
+
+  if (now > entry.expiresAt) {
     localOtpStore.delete(email);
     res.status(401).json({ success: false, message: "OTP expired. Request a new one." });
     return;
   }
 
   if (entry.code !== token) {
-    res.status(401).json({ success: false, message: "Invalid authorization code." });
+    entry.attempts++;
+    if (entry.attempts >= MAX_OTP_ATTEMPTS) {
+      entry.lockedUntil = now + LOCKOUT_DURATION_MS;
+      logger.warn(`Email ${email} locked for ${LOCKOUT_DURATION_MS / 1000} seconds due to too many failed OTP attempts.`);
+      res.status(429).json({
+        success: false,
+        message: `Too many failed attempts. Email locked for ${LOCKOUT_DURATION_MS / 1000} seconds.`,
+      });
+    } else {
+      res.status(401).json({ success: false, message: "Invalid authorization code." });
+    }
+    localOtpStore.set(email, entry); // Update the entry in the store
     return;
   }
 
-  localOtpStore.delete(email);
+  // OTP is valid
+  localOtpStore.delete(email); // Invalidate OTP after successful use
 
   // Return a simple non-JWT session token — the frontend trusts non-JWT tokens indefinitely
   const sessionToken = `zarith_local_${Date.now()}_${Math.random().toString(36).slice(2)}`;
