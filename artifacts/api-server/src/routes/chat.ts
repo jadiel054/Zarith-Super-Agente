@@ -297,7 +297,7 @@ ${repoContext}`;
     blocks.push({ type: "thinking", content: `🧠 [${finalModel}] Zarith em operação...`, model: finalModel });
 
     // ... (O restante da função processToolCall e o fechamento da rota permanecem os mesmos)
-    const processToolCall = async (model: ModelId, response: any, contextMsgs?: any[]): Promise<void> => {
+    const processToolCall = async (model: ModelId, response: any, contextMsgs?: any[]): Promise<any> => {
       const toolCall = extractToolCall(model, response);
 
       if (!toolCall || toolCall.name !== "execute_github_operation") {
@@ -307,7 +307,7 @@ ${repoContext}`;
           content: text || "Resposta sem conteúdo.",
           model,
         });
-        return;
+        return null;
       }
 
       const { operation, path, paths, code, reasoning } = toolCall.params;
@@ -329,7 +329,7 @@ ${repoContext}`;
             content: "❌ Operação de leitura sem caminhos especificados.",
             model,
           });
-          return;
+          return null;
         }
 
         blocks.push({
@@ -366,8 +366,9 @@ ${repoContext}`;
 
         const secondResponse = await callAi(model, followUpMsgs);
         if (secondResponse && !isRateLimited(secondResponse)) {
-          await processToolCall(model, secondResponse, followUpMsgs);
+          return processToolCall(model, secondResponse, followUpMsgs);
         }
+        return null;
       } else if (operation === "write") {
         if (!path || !code) {
           blocks.push({
@@ -375,7 +376,7 @@ ${repoContext}`;
             content: "❌ Operação de escrita sem path ou code definidos.",
             model,
           });
-          return;
+          return null;
         }
 
         blocks.push({
@@ -420,7 +421,9 @@ ${repoContext}`;
             model,
           });
         }
+        return null;
       }
+      return null;
     };
 
     await processToolCall(finalModel, aiResponse);

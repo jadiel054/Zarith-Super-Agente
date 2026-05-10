@@ -67,9 +67,9 @@ router.post("/speak", async (req, res) => {
     const audioBuffer = await response.arrayBuffer();
     res.set("Content-Type", "audio/mpeg");
     res.set("Cache-Control", "no-cache");
-    res.send(Buffer.from(audioBuffer));
+    return res.send(Buffer.from(audioBuffer));
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 

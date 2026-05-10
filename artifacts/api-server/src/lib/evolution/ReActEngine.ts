@@ -1,7 +1,19 @@
 import { db } from "@workspace/db";
 import { zarithExecutionLogsTable, zarithMemoryTable, zarithAuthorizationsTable } from "@workspace/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, desc } from "drizzle-orm";
 import { OpenAI } from "openai"; // Usaremos OpenAI para embeddings e possivelmente para o LLM principal
+import {
+  readGitHubFiles,
+  writeGitHubFile,
+  deleteGitHubFile,
+  listDirectory,
+  searchRepoCode,
+  executeCommand,
+  readFileLocal,
+  writeFileLocal,
+  listDirectoryLocal,
+  deleteFileLocal,
+} from "./tools";
 
 interface Tool {
   name: string;
@@ -86,7 +98,7 @@ export class ReActEngine {
       model: "gpt-4o", // Ou outro modelo, dependendo da configuração
       messages: [
         { role: "system", content: "Você é um agente autônomo. Pense cuidadosamente e decida a próxima ação." },
-        ...history.map(h => ({ role: "assistant", content: `Thought: ${h.thought}\nAction: ${JSON.stringify(h.action)}\nObservation: ${h.observation}`})),
+        ...history.map(h => ({ role: "assistant", content: `Thought: ${h.thought}\nAction: ${JSON.stringify(h.action)}\nObservation: ${h.observation}` } as any)),
         { role: "user", content: prompt },
         { role: "system", content: `Memórias relevantes para a tarefa:\n${(await this.retrieveMemory(prompt)).map(m => m.content).join("\n")}` }
       ],
@@ -102,7 +114,7 @@ export class ReActEngine {
     let action: { name: string; params: any } | undefined;
 
     if (choice.tool_calls && choice.tool_calls.length > 0) {
-      const toolCall = choice.tool_calls[0];
+      const toolCall = choice.tool_calls[0] as any;
       action = {
         name: toolCall.function.name,
         params: JSON.parse(toolCall.function.arguments),
@@ -171,17 +183,17 @@ export class ReActEngine {
               const results = await Promise.all(
                 fileList.map((f) => writeGitHubFile(f.path, f.code, reasoning ?? "Scaffold", model))
               );
-              const ok = results.filter((r) => r.ok).length;
-              const failed = results.filter((r) => !r.ok);
+              const ok = results.filter((r:any) => r.ok).length;
+              const failed = results.filter((r:any) => !r.ok);
               if (failed.length > 0) {
-                this.emitBlock("error", `⚠️ ${failed.length} arquivo(s) falharam:\n${failed.map((r) => r.msg).join("\n")}`, model);
+                this.emitBlock("error", `⚠️ ${failed.length} arquivo(s) falharam:\n${failed.map((r:any) => r.msg).join("\n")}`, model);
               }
               this.emitBlock(
                 ok === fileList.length ? "result" : "error",
                 `✅ ${ok}/${fileList.length} arquivos commitados com sucesso.`,
                 model
               );
-              return results.map((r) => r.msg).join("\n");
+              return results.map((r:any) => r.msg).join("\n");
             }
             case "delete_file": {
               if (!path) { this.emitBlock("error", "❌ delete_file requer \'path\'.", model); return "ERRO: path obrigatório."; }
@@ -204,26 +216,23 @@ export class ReActEngine {
             }
             case "analyze_error": {
               this.emitBlock("thinking", `🐛 Analisando erro: ${(error_text ?? "").slice(0, 200)}...`, model);
-              const pathMatches =
-                (error_text ?? "").match(/(?:at\s+|in\s+|File\s+|→\s*)([\/\w\-\.]+\.[a-z]{2,4})/gi) ?? [];
-              const filePaths = [
-                ...new Set(pathMatches.map((m: string) => m.replace(/^(?:at|in|File|→)\s*/i, "").trim())),
-              ].slice(0, 5);
+              const pathMatches = (error_text ?? "").match(/(?:at\s+|in\s+|File\s+|→\s*)([\/\w\-\.]+\.[a-z]{2,4})/gi) ?? [];
+              const filePaths = [...new Set(pathMatches.map((m: string) => m.replace(/^(?:at|in|File|→)\s*/i, "").trim()))].slice(0, 5);
               if (filePaths.length > 0) {
                 this.emitBlock("action", `📖 Lendo arquivos relacionados ao erro: ${filePaths.join(", ")}`, model);
-                const contents = await readGitHubFiles(filePaths);
+                const contents = await readGitHubFiles(filePaths.filter((p): p is string => !!p));
                 return `Arquivos relacionados:\n${Object.entries(contents).map(([p, c]) => `=== ${p} ===\n\`\`\`\n${c}\n\`\`\``).join("\n\n")}\n\nAnálise do erro: ${error_text}`;
               }
               return `Análise do erro: ${error_text}`;
             }
             case "read_runtime_logs": {
               this.emitBlock("action", `📋 Lendo logs de execução...`, model);
-              const logs = await this.db.select().from(zarithExecutionLogsTable).orderBy(desc(zarithExecutionLogsTable.timestamp)).limit(50);
+              const logs = await this.db.select().from(zarithExecutionLogsTable).orderBy(desc(zarithExecutionLogsTable.createdAt)).limit(50);
               if (logs.length === 0) {
                 this.emitBlock("result", "Nenhum log de execução encontrado.", model);
                 return "Nenhum log de execução encontrado.";
               }
-              const formattedLogs = logs.map(log => `[${new Date(log.timestamp).toLocaleString()}] ${log.status.toUpperCase()}: ${log.thought} ${log.action ? `(Action: ${log.action})` : ''} ${log.observation ? `(Observation: ${log.observation})` : ''}`).join('\n');
+              const formattedLogs = logs.map(log => `[${new Date(log.createdAt).toLocaleString()}] ${log.status!.toUpperCase()}: ${log.thought} ${log.action ? `(Action: ${log.action})` : ''} ${log.observation ? `(Observation: ${log.observation})` : ''}`).join('\n');
               this.emitBlock("result", `✅ Últimos 50 logs de execução:\n${formattedLogs}`, model);
               return `Últimos 50 logs de execução:\n${formattedLogs}`;
             }
@@ -281,7 +290,7 @@ export class ReActEngine {
     return result;
   }
 
-  async run(initialPrompt: string, modelId: string): Promise<any> {
+  async run(initialPrompt: string, modelId: string, taskId: string): Promise<any> {
     let currentPrompt = initialPrompt;
     let history: AgentThought[] = [];
     let maxIterations = 10; // Limite para evitar loops infinitos
@@ -302,8 +311,8 @@ export class ReActEngine {
         return { finalThought: thought, history };
       }
     }
-
-    await this.logExecution({ taskId, thought: "Max iterations reached", status: "failed" });
-    return { finalThought: "Max iterations reached", history };
+    const finalThought = "Max iterations reached";
+    await this.logExecution({ taskId, thought: finalThought, status: "failed" });
+    return { finalThought, history };
   }
 }

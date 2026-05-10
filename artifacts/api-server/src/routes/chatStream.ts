@@ -1,9 +1,8 @@
 import { Router } from "express";
 import { ReActEngine } from "../lib/evolution/ReActEngine";
-import { TOOLS, readGitHubFiles, writeGitHubFile, deleteGitHubFile, listDirectory, searchRepoCode, getRepoTree } from "../lib/evolution/tools";
+import { TOOLS, getRepoTree } from "../lib/evolution/tools";
 import { db } from "@workspace/db";
-import { chatMessagesTable, activityLogTable, zarithExecutionLogsTable } from "@workspace/db";
-import { desc } from "drizzle-orm";
+import { chatMessagesTable } from "@workspace/db";
 
 const router = Router();
 
@@ -11,67 +10,20 @@ const REPO_OWNER = "jadiel054";
 const REPO_NAME = "Zarith-Super-Agente";
 const SUPABASE_PROJECT_ID = process.env.SUPABASE_PROJECT_ID || "dlwcphhzasvromnagvgh"; // Usar o ID do projeto Zarith-SaaS
 
-// Gemini é o CORE PRINCIPAL. Claude e OpenAI são fallbacks. Groq removido.
-type ModelId = "GEMINI" | "CLAUDE" | "OPENAI";
-
 interface Block {
-  type: "thinking" | "action" | "result" | "text" | "error";
+  type: "thinking" | "action" | "result" | "text" | "error" | "ask";
   content: string;
   model?: string;
 }
 
+async function getRepoTreeAsString(): Promise<string> {
+    const tree = await getRepoTree();
+    if (tree.length > 0) {
+        return `\n\nREPO ZARITH — ESTRUTURA ATUAL:\n${tree.join("\n")}`;
+    }
+    return "";
+}
 
-const TOOLS = [
-  {
-    name: "zarith_tool",
-    description: `Ferramenta unificada do agente Zarith para autocodificação e gestão do repositório GitHub.
-Operações disponíveis:
-- read_files: Lê um ou múltiplos arquivos do repo para entender contexto
-- write_file: Commita código em um arquivo (sempre leia antes de escrever)
-- multi_write: Cria/edita múltiplos arquivos em um único commit (para scaffolding de projetos)
-- delete_file: Remove um arquivo do repositório
-- list_directory: Lista conteúdo de um diretório
-- search_code: Busca padrões de código no repositório
-- create_project: Cria estrutura completa de um novo projeto (vários arquivos)
-- analyze_error: Analisa um erro, encontra a causa raiz e propõe correção
-- read_runtime_logs: Lê as últimas 50 entradas do log de atividade do servidor — use ANTES de grandes alterações para aprender com o histórico e APÓS commits para verificar erros de execução`,
-    input_schema: {
-      type: "object",
-      properties: {
-        operation: {
-          type: "string",
-          enum: [
-            "read_files",
-            "write_file",
-            "multi_write",
-            "delete_file",
-            "list_directory",
-            "search_code",
-            "create_project",
-            "analyze_error",
-            "read_runtime_logs",
-          ],
-        },
-        path: { type: "string", description: "Caminho do arquivo (para operações em arquivo único)" },
-        paths: { type: "array", items: { type: "string" }, description: "Lista de caminhos para leitura múltipla" },
-        code: { type: "string", description: "Conteúdo completo do arquivo a commitar" },
-        files: {
-          type: "array",
-          description: "Para multi_write/create_project: lista de {path, code} para commit simultâneo",
-          items: {
-            type: "object",
-            properties: { path: { type: "string" }, code: { type: "string" } },
-            required: ["path", "code"],
-          },
-        },
-        query: { type: "string", description: "Termo de busca para search_code" },
-        error_text: { type: "string", description: "Stack trace ou mensagem de erro para analyze_error" },
-        reasoning: { type: "string", description: "Justificativa detalhada da operação" },
-      },
-      required: ["operation", "reasoning"],
-    },
-  },
-];
 
 // ─── System Prompt ────────────────────────────────────────────────────────────
 
@@ -109,7 +61,7 @@ ${repoTree ? `\nÁRVORE DO REPOSITÓRIO ZARITH:\n${repoTree}` : ""}`;
 // ─── Main Stream Route ────────────────────────────────────────────────────────
 
 router.post("/chat/stream", async (req, res) => {
-  const { content, selectedModel, isAiActive = true } = req.body;
+  const { content, selectedModel, isAiActive = true, taskId } = req.body;
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -148,20 +100,32 @@ router.post("/chat/stream", async (req, res) => {
     return;
   }
 
-  const systemPrompt = buildSystemPrompt(await getRepoTree());
+  const systemPrompt = buildSystemPrompt(await getRepoTreeAsString());
 
   const reactEngine = new ReActEngine(SUPABASE_PROJECT_ID, REPO_OWNER, REPO_NAME, db, emitBlock, TOOLS);
 
   // O novo fluxo principal agora usa o ReActEngine
   try {
-    const final_response = await reactEngine.run(content, selectedModel);
-    emitBlock("text", final_response);
+    const final_response = await reactEngine.run(content, selectedModel, taskId);
+    // A ReActEngine agora emite seus próprios blocos. O que fazemos com a resposta final?
+    // Por enquanto, vamos apenas logar e talvez emitir um bloco de texto final.
+    if (typeof final_response === 'string') {
+      emitBlock("text", final_response);
+    } else {
+      emitBlock("text", final_response.finalThought);
+    }
+
   } catch (e: any) {
     console.error("Error during ReActEngine execution:", e);
-    emitBlock("error", `Erro fatal no motor ReAct: ${e.message}`);
+    if (e.message.startsWith("AuthorizationRequired")) {
+      // O erro de autorização é um caso especial que precisa ser tratado no frontend.
+      // O emitBlock para a pergunta já foi enviado pelo ReActEngine.
+    } else {
+      emitBlock("error", `Erro fatal no motor ReAct: ${e.message}`);
+    }
   }
 
-  const textBlocks = allBlocks.filter((b) => b.type === "text" || b.type === "result");
+  const textBlocks = allBlocks.filter((b) => b.type === "text" || b.type === "result" || b.type === "ask");
   const textForSpeech =
     textBlocks.length > 0 ? textBlocks[textBlocks.length - 1].content.slice(0, 500) : "";
   await done(textBlocks.length > 0, textForSpeech);

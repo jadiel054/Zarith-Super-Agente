@@ -2,11 +2,10 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { userSettingsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
-import { getConfig, updateConfig, maskKey } from "../lib/config";
+import ZarithConfig, { getConfig, updateConfig, maskKey } from "../lib/config";
 
 const router = Router();
 
-// Groq removido — Gemini é o CORE PRINCIPAL
 const SETTING_KEYS = [
   "geminiApiKey",
   "openaiApiKey",
@@ -50,30 +49,30 @@ async function saveUserSetting(email: string, key: string, value: string | null)
 }
 
 function buildResponse(
-  config: ReturnType<typeof getConfig>,
+  config: typeof ZarithConfig,
   dbSettings: Record<string, string | null>
 ) {
-  const effectiveGemini = dbSettings["geminiApiKey"] ?? config.geminiApiKey;
+  const effectiveGemini = dbSettings["geminiApiKey"] ?? (config as any).geminiApiKey;
   const effectiveGithub = dbSettings["githubToken"] ?? (config as any).githubToken;
 
   return {
-    geminiApiKey: maskKey(effectiveGemini),
+    geminiApiKey: maskKey(effectiveGemini ?? ""),
     geminiApiKeySet: Boolean(effectiveGemini),
-    openaiApiKey: maskKey(dbSettings["openaiApiKey"] ?? null),
+    openaiApiKey: maskKey(dbSettings["openaiApiKey"] ?? ""),
     openaiApiKeySet: Boolean(dbSettings["openaiApiKey"]),
-    anthropicApiKey: maskKey(dbSettings["anthropicApiKey"] ?? null),
+    anthropicApiKey: maskKey(dbSettings["anthropicApiKey"] ?? ""),
     anthropicApiKeySet: Boolean(dbSettings["anthropicApiKey"]),
-    elevenLabsApiKey: maskKey(dbSettings["elevenLabsApiKey"] ?? null),
+    elevenLabsApiKey: maskKey(dbSettings["elevenLabsApiKey"] ?? ""),
     elevenLabsApiKeySet: Boolean(dbSettings["elevenLabsApiKey"]),
     elevenLabsVoiceId: dbSettings["elevenLabsVoiceId"] ?? null,
     elevenLabsVoiceIdSet: Boolean(dbSettings["elevenLabsVoiceId"]),
-    googleMapsApiKey: maskKey(dbSettings["googleMapsApiKey"] ?? null),
+    googleMapsApiKey: maskKey(dbSettings["googleMapsApiKey"] ?? ""),
     googleMapsApiKeySet: Boolean(dbSettings["googleMapsApiKey"]),
-    searchApiKey: maskKey(dbSettings["searchApiKey"] ?? null),
+    searchApiKey: maskKey(dbSettings["searchApiKey"] ?? ""),
     searchApiKeySet: Boolean(dbSettings["searchApiKey"]),
-    githubToken: maskKey(effectiveGithub),
+    githubToken: maskKey(effectiveGithub ?? ""),
     githubTokenSet: Boolean(effectiveGithub),
-    vercelToken: maskKey(dbSettings["vercelToken"] ?? null),
+    vercelToken: maskKey(dbSettings["vercelToken"] ?? ""),
     vercelTokenSet: Boolean(dbSettings["vercelToken"]),
   };
 }
@@ -98,7 +97,7 @@ router.patch("/", async (req, res) => {
     }
 
     // Atualiza config em memória para uso imediato
-    if (key === "geminiApiKey") updateConfig({ geminiApiKey: val });
+    if (key === "geminiApiKey") updateConfig({ geminiApiKey: val } as any);
     if (key === "githubToken" && val) updateConfig({ githubToken: val } as any);
   }
 
