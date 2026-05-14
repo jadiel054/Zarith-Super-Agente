@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -13,7 +13,6 @@ import Logs from "@/pages/logs";
 import Settings from "@/pages/settings";
 
 import { Shell } from "@/components/layout/shell";
-import { ProtectedRoute } from "@/components/layout/protected-route";
 import { useAuth } from "@/hooks/use-auth";
 
 const queryClient = new QueryClient({
@@ -23,24 +22,18 @@ const queryClient = new QueryClient({
   },
 });
 
-// Configura a URL base da API em produção
 function ApiBaseUrlSync() {
   useEffect(() => {
-    // Em produção (Vercel), a API está no mesmo domínio
-    // Em desenvolvimento, pode estar em localhost:8080
     const apiUrl = import.meta.env.PROD
       ? window.location.origin
       : import.meta.env.VITE_API_URL || "http://localhost:8080";
     setBaseUrl(apiUrl);
   }, []);
-
   return null;
 }
 
-// Keeps the X-User-Email header in sync with the current auth session
 function AuthHeaderSync() {
   const { email } = useAuth();
-
   useEffect(() => {
     if (email) {
       setGlobalHeaders({ "X-User-Email": email });
@@ -48,56 +41,49 @@ function AuthHeaderSync() {
       setGlobalHeaders({});
     }
   }, [email]);
-
   return null;
 }
 
 function Router() {
   return (
     <Switch>
-      <Route path="/login" component={Login} />
-
+      {/* Rota Raiz agora renderiza o Dashboard diretamente dentro do Shell */}
       <Route path="/">
-        <ProtectedRoute>
-          <Shell>
-            <Dashboard />
-          </Shell>
-        </ProtectedRoute>
+        <Shell>
+          <Dashboard />
+        </Shell>
       </Route>
 
+      <Route path="/login" component={Login} />
+
       <Route path="/dashboard">
-        <ProtectedRoute>
-          <Shell>
-            <Dashboard />
-          </Shell>
-        </ProtectedRoute>
+        <Shell>
+          <Dashboard />
+        </Shell>
       </Route>
 
       <Route path="/tasks">
-        <ProtectedRoute>
-          <Shell>
-            <Tasks />
-          </Shell>
-        </ProtectedRoute>
+        <Shell>
+          <Tasks />
+        </Shell>
       </Route>
 
       <Route path="/logs">
-        <ProtectedRoute>
-          <Shell>
-            <Logs />
-          </Shell>
-        </ProtectedRoute>
+        <Shell>
+          <Logs />
+        </Shell>
       </Route>
 
       <Route path="/settings">
-        <ProtectedRoute>
-          <Shell>
-            <Settings />
-          </Shell>
-        </ProtectedRoute>
+        <Shell>
+          <Settings />
+        </Shell>
       </Route>
 
-      <Route component={NotFound} />
+      {/* Em caso de erro, redireciona para a home/dashboard */}
+      <Route>
+        <Redirect to="/" />
+      </Route>
     </Switch>
   );
 }
@@ -106,7 +92,8 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+        {/* Ajuste para evitar erros de base URL vazia */}
+        <WouterRouter base={(import.meta.env.BASE_URL || "").replace(/\/$/, "")}>
           <ApiBaseUrlSync />
           <AuthHeaderSync />
           <Router />
