@@ -1,10 +1,28 @@
 import express from "express";
 import cors from "cors";
+import { createClient } from './lib/supabase.config';
 
+const supabase = createClient();
 const app = express();
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+
+export function logAgentAction(action, status, details) {
+  supabase
+    .from('agent_actions')
+    .insert([{
+      action,
+      status,
+      details,
+    }])
+    .then(() => {
+      console.log('Ação registrada com sucesso!');
+    })
+    .catch((error) => {
+      console.error('Erro ao registrar ação:', error);
+    });
+}
 
 export default async function handler(req, res) {
   try {
