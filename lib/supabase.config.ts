@@ -1,0 +1,1 @@
+# Insira aqui o conteúdo do arquivo supabase.config.ts com as variáveis de ambiente corretas
