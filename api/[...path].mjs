@@ -1,3 +1,9 @@
 import supabase from '../lib/supabase.config';
 
-// usar supabase como supabase.from(...)
+export function logAgentAction() {
+  supabase.from('agent_actions').insert([
+    {
+      action: ' teste ',
+    },
+  ]);
+}
