@@ -24,9 +24,11 @@ const queryClient = new QueryClient({
 
 function ApiBaseUrlSync() {
   useEffect(() => {
+    // In production: use VITE_API_URL if set (points to Render backend),
+    // otherwise fall back to same origin (useful if frontend + backend are co-hosted)
     const apiUrl = import.meta.env.PROD
-      ? window.location.origin
-      : import.meta.env.VITE_API_URL || "http://localhost:8080";
+      ? (import.meta.env.VITE_API_URL || window.location.origin)
+      : (import.meta.env.VITE_API_URL || "http://localhost:8080");
     setBaseUrl(apiUrl);
   }, []);
   return null;
