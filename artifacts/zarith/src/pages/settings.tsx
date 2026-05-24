@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
-import { Eye, EyeOff, Save, RefreshCw, Cpu, Mic2, Globe, CheckCircle2, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { Eye, EyeOff, Save, RefreshCw, Cpu, Mic2, Globe, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Zap } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 
-const API_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const API_BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 
 interface SettingsData {
   groqApiKey: string | null; groqApiKeySet: boolean;
@@ -16,8 +16,6 @@ interface SettingsData {
   googleMapsApiKey: string | null; googleMapsApiKeySet: boolean;
   searchApiKey: string | null; searchApiKeySet: boolean;
 }
-
-// ── Types ────────────────────────────────────────────────────────────────────
 
 type FieldKey = keyof Pick<SettingsData,
   "groqApiKey" | "openaiApiKey" | "anthropicApiKey" | "geminiApiKey" |
@@ -38,8 +36,43 @@ interface ProviderGroup {
   fields: FieldDef[];
 }
 
-// ── Provider configuration ───────────────────────────────────────────────────
+// ─── Groq Easter Egg Toast ───────────────────────────────────────────────────
+function GroqEasterEggToast({ onDismiss }: { onDismiss: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 8000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
 
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 24, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 24, scale: 0.95 }}
+      className="fixed bottom-6 right-6 z-50 flex items-start gap-3 max-w-sm w-full bg-black border border-yellow-500/40 rounded-sm p-4 shadow-[0_0_30px_rgba(234,179,8,0.15)]"
+    >
+      <div className="shrink-0 w-10 h-10 rounded-full overflow-hidden border border-yellow-500/30">
+        <img src="/zarith-avatar.png" alt="ZARITH" className="w-full h-full object-cover object-top" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 mb-1">
+          <Zap className="w-3 h-3 text-yellow-400" />
+          <span className="text-[10px] font-mono text-yellow-400 uppercase tracking-widest">ZARITH — Modo Groq</span>
+        </div>
+        <p className="text-xs font-mono text-foreground/90 leading-relaxed">
+          Groq ativo. E ó: cara, sou um agente de código, não de visão! Nem tenta me mandar imagem.
+        </p>
+      </div>
+      <button
+        onClick={onDismiss}
+        className="text-muted-foreground hover:text-foreground text-xs font-mono mt-0.5 shrink-0"
+      >
+        ✕
+      </button>
+    </motion.div>
+  );
+}
+
+// ─── Provider configuration ───────────────────────────────────────────────────
 const PROVIDERS: ProviderGroup[] = [
   {
     icon: <Cpu className="w-4 h-4 text-primary" />,
@@ -72,8 +105,6 @@ const PROVIDERS: ProviderGroup[] = [
   },
 ];
 
-// ── Key status helper ────────────────────────────────────────────────────────
-
 function isSet(settings: SettingsData | null, key: FieldKey): boolean {
   const setKey = (key + "Set") as keyof SettingsData;
   return Boolean(settings?.[setKey]);
@@ -83,8 +114,7 @@ function maskedValue(settings: SettingsData | null, key: FieldKey): string | nul
   return settings?.[key] as string | null ?? null;
 }
 
-// ── Inline editable field ────────────────────────────────────────────────────
-
+// ─── Inline editable field ────────────────────────────────────────────────────
 interface FieldRowProps {
   label: string;
   fieldKey: FieldKey;
@@ -157,9 +187,7 @@ function FieldRow({ label, fieldKey, masked, set, isVoiceId, onSave, saving }: F
             <div className="flex gap-2">
               <div
                 className={`flex-1 flex items-center gap-2 px-3 py-2 rounded-sm border bg-primary/5 transition-all duration-200 ${
-                  focused
-                    ? "border-primary shadow-[0_0_12px_rgba(0,255,255,0.3)]"
-                    : "border-primary/25"
+                  focused ? "border-primary shadow-[0_0_12px_rgba(0,255,255,0.3)]" : "border-primary/25"
                 }`}
               >
                 <input
@@ -202,8 +230,7 @@ function FieldRow({ label, fieldKey, masked, set, isVoiceId, onSave, saving }: F
   );
 }
 
-// ── Provider Card ────────────────────────────────────────────────────────────
-
+// ─── Provider Card ────────────────────────────────────────────────────────────
 interface ProviderCardProps {
   group: ProviderGroup;
   settings: SettingsData | null;
@@ -232,9 +259,7 @@ function ProviderCard({ group, settings, onSave, saving }: ProviderCardProps) {
         </div>
         <div className="flex items-center gap-3">
           <span className={`text-[10px] font-mono px-2 py-0.5 rounded border uppercase ${
-            activeCount > 0
-              ? "text-primary border-primary/30 bg-primary/5"
-              : "text-muted-foreground border-muted-foreground/20"
+            activeCount > 0 ? "text-primary border-primary/30 bg-primary/5" : "text-muted-foreground border-muted-foreground/20"
           }`}>
             {activeCount}/{group.fields.length} active
           </span>
@@ -271,14 +296,14 @@ function ProviderCard({ group, settings, onSave, saving }: ProviderCardProps) {
   );
 }
 
-// ── Page ─────────────────────────────────────────────────────────────────────
-
+// ─── Page ─────────────────────────────────────────────────────────────────────
 export default function Settings() {
   const { email } = useAuth();
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showGroqEgg, setShowGroqEgg] = useState(false);
 
   const headers = () => ({
     "Content-Type": "application/json",
@@ -312,6 +337,11 @@ export default function Settings() {
       if (!res.ok) throw new Error("Update failed");
       const data = await res.json() as SettingsData & { success: boolean };
       setSettings(data);
+
+      // Groq Easter Egg 🐔
+      if (key === "groqApiKey" && value.trim()) {
+        setShowGroqEgg(true);
+      }
     } catch {
       setError("Failed to update configuration.");
     } finally {
@@ -346,7 +376,6 @@ export default function Settings() {
         </Button>
       </div>
 
-      {/* Summary bar */}
       {!loading && settings && (
         <motion.div
           initial={{ opacity: 0 }}
@@ -403,6 +432,13 @@ export default function Settings() {
           </div>
         )}
       </div>
+
+      {/* Groq Easter Egg Toast */}
+      <AnimatePresence>
+        {showGroqEgg && (
+          <GroqEasterEggToast onDismiss={() => setShowGroqEgg(false)} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
