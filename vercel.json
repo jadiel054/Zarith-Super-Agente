@@ -1,14 +1,1 @@
-{
-  "buildCommand": "pnpm run build",
-  "installCommand": "pnpm install --no-frozen-lockfile",
-  "outputDirectory": "artifacts/zarith/dist/public",
-  "functions": {
-    "api/[...path].mjs": {
-      "maxDuration": 30
-    }
-  },
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/[...path].mjs" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
-}
+{ "buildCommand": "pnpm run build", "installCommand": "pnpm install --no-frozen-lockfile", "outputDirectory": "artifacts/zarith/dist/public", "rewrites": [ { "source": "/(.*)", "destination":  "/index.html" } ] }
