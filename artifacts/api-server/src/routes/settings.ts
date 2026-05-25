@@ -6,8 +6,6 @@ import ZarithConfig, { getConfig, updateConfig, maskKey } from "../lib/config";
 
 const router = Router();
 
-// Preflight explícito
-router.options("/", (_req, res) => res.sendStatus(200));
 
 const SETTING_KEYS = [
   "geminiApiKey",

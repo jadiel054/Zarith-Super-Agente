@@ -24,10 +24,7 @@ const corsOptions: cors.CorsOptions = {
   optionsSuccessStatus: 200, // Some browsers (IE11) choke on 204
 };
 
-// Responde preflight OPTIONS para todas as rotas ANTES de qualquer middleware
-app.options("*", cors(corsOptions));
-
-// Aplica CORS em todas as demais rotas
+// Aplica CORS globalmente — inclui preflight OPTIONS automaticamente
 app.use(cors(corsOptions));
 
 // ── BODY PARSING ──────────────────────────────────────────────────────────────
