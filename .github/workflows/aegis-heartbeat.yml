@@ -1,0 +1,21 @@
+name: Aegis heartbeat (Zarith)
+on:
+  schedule:
+    - cron: "*/2 * * * *"
+  workflow_dispatch:
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping Aegis
+        env:
+          AEGIS_BASE_URL: ${{ vars.AEGIS_BASE_URL || 'https://aegis-control-sand.vercel.app' }}
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail \
+            --request POST "$AEGIS_BASE_URL/api/agents/heartbeat" \
+            --header 'Content-Type: application/json' \
+            --data '{"name":"Zarith","status":"online","metadata":{"source":"github-actions","repo":"Zarith-Super-Agente"}}'
+          echo
+          echo "Zarith heartbeat OK"
